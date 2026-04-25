@@ -1,14 +1,19 @@
 from aiagent.brain.agent_core import AgentCore
-from aiagent.brain.context_builder import ContextBuilder
 from aiagent.brain.dialogue_manager import DialogueManager
-from aiagent.brain.response_planner import ResponsePlanner
-from aiagent.brain.safety_guard import SafetyGuard
+from aiagent.cognition.planner_normalizer import PlannerNormalizer
+from aiagent.cognition.planner_reply import ReplyPlanner
+from aiagent.cognition.state_analyzer import StateAnalyzer
+from aiagent.cognition.state_normalizer import StateNormalizer
 from aiagent.common.logger import setup_logger
 from aiagent.expression.audio_playback_dispatcher import AudioPlaybackDispatcher
 from aiagent.expression.live2d_dispatcher import Live2DDispatcher
 from aiagent.expression.motion_policy import MotionPolicy
 from aiagent.expression.output_broadcaster import OutputBroadcaster
 from aiagent.expression.tts_dispatcher import TTSDispatcher
+from aiagent.graphs.llm_graph import LLMRunner
+from aiagent.graphs.main_graph import MainRunner
+from aiagent.graphs.planner_graph import PlannerRunner
+from aiagent.graphs.state_graph import StateRunner
 from aiagent.knowledge.document_loader import DocumentLoader
 from aiagent.knowledge.rag_pipeline import RAGPipeline
 from aiagent.knowledge.reranker import SimpleReranker
@@ -31,8 +36,9 @@ from aiagent.perception.voice_session_controller import VoiceSessionController
 from aiagent.perception.voice_turn_manager import VoiceTurnManager
 from aiagent.persona.persona_loader import PersonaLoader
 from aiagent.persona.persona_manager import PersonaManager
-from aiagent.persona.style_rewriter import StyleRewriter
 from aiagent.services.llm_service import LLMService
+from aiagent.services.planner_llm_service import PlannerLLMService
+from aiagent.services.state_llm_service import StateLLMService
 from aiagent.state.agent_state import AgentRuntimeState
 from aiagent.state.conversation_state import ConversationState
 from aiagent.state.emotion_state import EmotionState
@@ -48,7 +54,9 @@ from integrations.audio.audio_player import AudioPlayer
 from integrations.audio.microphone_recorder import MicrophoneRecorder
 from integrations.live2d.mock_live2d_client import MockLive2DClient
 from integrations.tts.gpt_sovits_client import GPTSoVITSClient
+from integrations.tts.indextts2_client import IndexTTS2Client
 from integrations.tts.mock_tts_client import MockTTSClient
+from integrations.tts.voxcpm_client import VoxCPMClient
 
 
 def build_runtime() -> CoreRuntime:
@@ -86,32 +94,46 @@ def build_runtime() -> CoreRuntime:
     )
     rag_pipeline.build_index(force_rebuild=False)
 
-    llm_service = LLMService(settings=settings)
-    context_builder = ContextBuilder(
-        llm_service=llm_service,
-        user_profile_memory=user_profile_memory,
-        rag_pipeline=rag_pipeline,
-        long_term_memory=long_term_memory,
+    state_llm_service = StateLLMService(settings=settings)
+    state_analyzer = StateAnalyzer(llm_service=state_llm_service)
+    state_normalizer = StateNormalizer()
+    state_runner = StateRunner(
+        state_analyzer=state_analyzer,
+        state_normalizer=state_normalizer,
     )
-    response_planner = ResponsePlanner()
-    safety_guard = SafetyGuard()
+
+    planner_llm_service = PlannerLLMService(settings=settings)
+    planner_reply = ReplyPlanner(llm_service=planner_llm_service)
+    planner_normalizer = PlannerNormalizer()
+    planner_runner = PlannerRunner(
+        planner_reply=planner_reply,
+        planner_normalizer=planner_normalizer,
+    )
+
+    llm_service = LLMService(settings=settings)
+    llm_runner = LLMRunner(
+        llm_service=llm_service,
+        short_term_turn_window=6,
+    )
+
+    main_runner = MainRunner(
+        state_runner=state_runner,
+        planner_runner=planner_runner,
+        llm_runner=llm_runner,
+    )
 
     persona_loader = PersonaLoader()
     persona_manager = PersonaManager(loader=persona_loader)
-    style_rewriter = StyleRewriter(llm_service=llm_service)
 
     agent_core = AgentCore(
-        llm_service=llm_service,
-        context_builder=context_builder,
-        response_planner=response_planner,
-        safety_guard=safety_guard,
-        style_rewriter=style_rewriter,
+        main_runner=main_runner,
         agent_state=agent_state,
         conversation_state=conversation_state,
         emotion_state=emotion_state,
     )
 
     mock_tts_client = MockTTSClient()
+
     gpt_sovits_client = GPTSoVITSClient(
         base_url=settings.gpt_sovits_base_url,
         timeout_seconds=settings.tts_timeout_seconds,
@@ -121,12 +143,28 @@ def build_runtime() -> CoreRuntime:
         text_lang=settings.gpt_sovits_text_lang,
     )
 
+    index_tts2_client = IndexTTS2Client(
+        base_url=settings.indextts2_base_url,
+        ref_audio_path=settings.indextts2_ref_audio_path,
+        emo_alpha=settings.indextts2_emo_alpha,
+        use_emo_text=settings.indextts2_use_emo_text,
+        max_segment_length=settings.indextts2_max_segment_length,
+        timeout_seconds=settings.tts_timeout_seconds,
+    )
+
+    voxcpm_client = VoxCPMClient(
+        base_url=settings.voxcpm_base_url,
+        timeout_seconds=settings.tts_timeout_seconds,
+    )
+
     tts_dispatcher = TTSDispatcher(
         mock_tts_client=mock_tts_client,
         speaking_state=speaking_state,
         tts_provider=settings.tts_provider,
         enable_mock_tts=settings.enable_mock_tts,
         gpt_sovits_client=gpt_sovits_client,
+        index_tts2_client=index_tts2_client,
+        voxcpm_client=voxcpm_client,
     )
 
     audio_playback_dispatcher = AudioPlaybackDispatcher(
@@ -213,6 +251,7 @@ def build_runtime() -> CoreRuntime:
 
     return CoreRuntime(
         dispatcher=dispatcher,
+        agent_core=agent_core,
         speaking_state=speaking_state,
         asr_listener=asr_listener,
         stream_state=streaming_state,

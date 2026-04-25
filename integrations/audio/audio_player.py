@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import logging
 import threading
 import time
@@ -13,24 +15,25 @@ class AudioPlayer:
     def __init__(self) -> None:
         self.logger = logging.getLogger(self.__class__.__name__)
         self._mixer_ready = False
-        self._playback_thread : threading.Thread | None = None
-        self._stop_event= threading.Event()
+        self._playback_thread: threading.Thread | None = None
+        self._stop_event = threading.Event()
         self._lock = threading.Lock()
-        self._current_audio_path:str = ""
+        self._current_audio_path: str = ""
+        self._current_playlist: list[str] = []
 
         self._ensure_mixer()
 
-    def _ensure_mixer(self)->None:
+    def _ensure_mixer(self) -> None:
         if self._mixer_ready:
             return
-        
-        try : 
+
+        try:
             if not pygame.mixer.get_init():
-                pygame.mixer.get_init()
+                pygame.mixer.init()
             self._mixer_ready = True
         except Exception:
-            self.logger.exception("初始化失败")
-            self._mixer_ready=False
+            self.logger.exception("Failed to initialize pygame mixer")
+            self._mixer_ready = False
             raise
 
     def play(self, audio_file: str) -> None:
@@ -41,8 +44,9 @@ class AudioPlayer:
 
         with self._lock:
             self._stop_event.clear()
-            self._current_audio_path = str(Path)
-        
+            self._current_audio_path = str(path)
+            self._current_playlist = [str(path)]
+
         self.logger.info("Playing audio file: %s", path)
         pygame.mixer.music.load(str(path))
         pygame.mixer.music.play()
@@ -55,9 +59,50 @@ class AudioPlayer:
             time.sleep(0.05)
 
         with self._lock:
-            self._current_audio_path =""
+            self._current_audio_path = ""
+            self._current_playlist = []
 
-    def play_async(self,audio_file:str) -> None:
+    def play_sequence(self, audio_files: list[str]) -> None:
+        self._ensure_mixer()
+
+        if not audio_files:
+            return
+
+        validated_paths = [Path(item) for item in audio_files]
+        for path in validated_paths:
+            self._validate_audio_file(path)
+
+        with self._lock:
+            self._stop_event.clear()
+            self._current_playlist = [str(path) for path in validated_paths]
+            self._current_audio_path = str(validated_paths[0])
+
+        for path in validated_paths:
+            if self._stop_event.is_set():
+                break
+
+            with self._lock:
+                self._current_audio_path = str(path)
+
+            self.logger.info("Playing audio segment: %s", path)
+            pygame.mixer.music.load(str(path))
+            pygame.mixer.music.play()
+
+            while pygame.mixer.music.get_busy():
+                if self._stop_event.is_set():
+                    self.logger.info("Stopping audio sequence playback")
+                    pygame.mixer.music.stop()
+                    break
+                time.sleep(0.05)
+
+            if self._stop_event.is_set():
+                break
+
+        with self._lock:
+            self._current_audio_path = ""
+            self._current_playlist = []
+
+    def play_async(self, audio_file: str) -> None:
         self.stop(wait=True)
 
         def runner() -> None:
@@ -66,15 +111,27 @@ class AudioPlayer:
             except Exception:
                 self.logger.exception("Audio playback failed")
 
-
-        thread = threading.Thread(target=runner, daemon=True,name="audio-playback-thread")
+        thread = threading.Thread(target=runner, daemon=True, name="audio-playback-thread")
         self._playback_thread = thread
         thread.start()
 
-    def stop(self,wait:bool = False)->None:
+    def play_sequence_async(self, audio_files: list[str]) -> None:
+        self.stop(wait=True)
+
+        def runner() -> None:
+            try:
+                self.play_sequence(audio_files)
+            except Exception:
+                self.logger.exception("Audio sequence playback failed")
+
+        thread = threading.Thread(target=runner, daemon=True, name="audio-playback-thread")
+        self._playback_thread = thread
+        thread.start()
+
+    def stop(self, wait: bool = False) -> None:
         with self._lock:
             self._stop_event.set()
-        
+
         try:
             if self._mixer_ready and pygame.mixer.music.get_busy():
                 pygame.mixer.music.stop()
@@ -84,6 +141,10 @@ class AudioPlayer:
         if wait and self._playback_thread is not None and self._playback_thread.is_alive():
             self._playback_thread.join(timeout=1.0)
 
+        with self._lock:
+            self._current_audio_path = ""
+            self._current_playlist = []
+
     def is_busy(self) -> bool:
         try:
             if not self._mixer_ready:
@@ -92,12 +153,15 @@ class AudioPlayer:
         except Exception:
             self.logger.exception("Failed to check audio playback status")
             return False
-        
-    def get_current_audio_path(self)->str:
+
+    def get_current_audio_path(self) -> str:
         return self._current_audio_path
-    
-    def get_duration_seconds(self,audio_file:str) ->float:
-        path =Path(audio_file)
+
+    def get_current_playlist(self) -> list[str]:
+        return list(self._current_playlist)
+
+    def get_duration_seconds(self, audio_file: str) -> float:
+        path = Path(audio_file)
         self._validate_audio_file(path)
 
         if path.suffix.lower() == ".wav":
@@ -107,13 +171,21 @@ class AudioPlayer:
                 return round(frame_count / frame_rate, 3)
 
         return 0.0
-        
-    def _validate_audio_file(self,path:Path) -> None:
+
+    def get_total_duration_seconds(self, audio_files: list[str]) -> float:
+        total = 0.0
+        for audio_file in audio_files:
+            try:
+                total += self.get_duration_seconds(audio_file)
+            except Exception:
+                self.logger.exception("Failed to get segment duration: %s", audio_file)
+        return round(total, 3)
+
+    def _validate_audio_file(self, path: Path) -> None:
         if not path.exists():
             raise FileNotFoundError(f"Audio file not found: {path}")
         if path.suffix.lower() not in self.SUPPORTED_SUFFIXES:
             raise ValueError(f"Unsupported audio format for playback: {path.suffix}")
-
         if path.stat().st_size == 0:
             raise ValueError(f"Audio file is empty: {path}")
 

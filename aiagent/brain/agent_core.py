@@ -1,140 +1,65 @@
-from typing import TypedDict
+from __future__ import annotations
 
-from langgraph.graph import END, START, StateGraph
-
-from aiagent.brain.context_builder import ContextBuilder
-from aiagent.brain.response_planner import ResponsePlanner
-from aiagent.brain.safety_guard import SafetyGuard
-from aiagent.persona.style_rewriter import StyleRewriter
+from aiagent.graphs.main_graph import MainRunner
+from aiagent.persona.persona_runtime import PersonaRuntime
 from aiagent.schemas.inputs import InputEvent
 from aiagent.schemas.outputs import ResponsePacket
-from aiagent.schemas.persona import PersonaConfig
-from aiagent.services.llm_service import LLMService
 from aiagent.state.agent_state import AgentRuntimeState, AgentStatus
 from aiagent.state.conversation_state import ConversationState
 from aiagent.state.emotion_state import EmotionState
 
 
-class BrainGraphState(TypedDict, total=False):
-    input_event: InputEvent
-    persona: PersonaConfig
-    system_prompt: str
-    user_input_text: str
-    raw_reply: str
-    safe_reply: str
-    styled_reply: str
-    response_packet: ResponsePacket
-
-
 class AgentCore:
     def __init__(
         self,
-        llm_service: LLMService,
-        context_builder: ContextBuilder,
-        response_planner: ResponsePlanner,
-        safety_guard: SafetyGuard,
-        style_rewriter: StyleRewriter,
+        main_runner: MainRunner,
         agent_state: AgentRuntimeState,
         conversation_state: ConversationState,
         emotion_state: EmotionState,
     ) -> None:
-        self.llm_service = llm_service
-        self.context_builder = context_builder
-        self.response_planner = response_planner
-        self.safety_guard = safety_guard
-        self.style_rewriter = style_rewriter
+        self.main_runner = main_runner
         self.agent_state = agent_state
         self.conversation_state = conversation_state
         self.emotion_state = emotion_state
-        self.graph = self._build_graph()
 
-    def _build_graph(self):
-        graph = StateGraph(BrainGraphState)
-
-        graph.add_node("build_context", self._build_context_node)
-        graph.add_node("call_llm", self._call_llm_node)
-        graph.add_node("rewrite_style", self._rewrite_style_node)
-        graph.add_node("plan_response", self._plan_response_node)
-
-        graph.add_edge(START, "build_context")
-        graph.add_edge("build_context", "call_llm")
-        graph.add_edge("call_llm", "rewrite_style")
-        graph.add_edge("rewrite_style", "plan_response")
-        graph.add_edge("plan_response", END)
-
-        return graph.compile()
-
-    def _build_context_node(self, state: BrainGraphState) -> BrainGraphState:
-        event = state["input_event"]
-        persona = state["persona"]
-
-        system_prompt = self.context_builder.build_system_prompt(
-            persona=persona,
-            conversation_state=self.conversation_state,
-            event=event,
-        )
-        user_input_text = self.context_builder.build_user_input_text(
-            event=event,
-            conversation_state=self.conversation_state,
-        )
-
-        return {
-            "system_prompt": system_prompt,
-            "user_input_text": user_input_text,
-        }
-
-    def _call_llm_node(self, state: BrainGraphState) -> BrainGraphState:
-        event = state["input_event"]
-        prompt = state["system_prompt"]
-        user_input_text = state.get("user_input_text") or event.text
-
-        raw_reply = self.llm_service.invoke_with_memory(
-            thread_id=event.user_id,
-            system_prompt=prompt,
-            user_text=user_input_text,
-            fallback_text=user_input_text,
-            mode="chat",
-        )
-
-        safe_reply = self.safety_guard.filter_text(raw_reply)
-        return {
-            "raw_reply": raw_reply,
-            "safe_reply": safe_reply,
-        }
-
-    def _rewrite_style_node(self, state: BrainGraphState) -> BrainGraphState:
-        persona = state["persona"]
-        safe_reply = state["safe_reply"]
-
-        styled_reply = self.style_rewriter.rewrite(
-            base_reply=safe_reply,
-            persona=persona,
-        )
-        styled_reply = self.safety_guard.filter_text(styled_reply)
-
-        return {"styled_reply": styled_reply}
-
-    def _plan_response_node(self, state: BrainGraphState) -> BrainGraphState:
-        packet = self.response_planner.plan(
-            final_reply_text=state["styled_reply"],
-            base_reply_text=state["safe_reply"],
-            input_event=state["input_event"],
-            conversation_state=self.conversation_state,
-        )
-        return {"response_packet": packet}
-
-    def process(self, event: InputEvent, persona: PersonaConfig) -> ResponsePacket:
+    def process(self, event: InputEvent, persona: PersonaRuntime) -> ResponsePacket:
         self.agent_state.status = AgentStatus.THINKING
         self.agent_state.last_input_id = event.event_id
+        self.agent_state.error_message = None
 
-        result = self.graph.invoke(
-            {
-                "input_event": event,
-                "persona": persona,
-            }
-        )
+        try:
+            history = self._build_history_lines()
 
-        packet = result["response_packet"]
-        self.emotion_state.current_emotion = packet.emotion
-        self.agent_state.status = AgentStatus.IDLE
-        return packet
+            packet = self.main_runner.run(
+                event=event,
+                persona_runtime=persona,
+                history=history,
+                retrieved_context=[],
+            )
+
+            self.emotion_state.current_emotion = packet.emotion
+            self.agent_state.status = AgentStatus.IDLE
+            return packet
+
+        except Exception as exc:
+            self.agent_state.status = AgentStatus.ERROR
+            self.agent_state.error_message = str(exc)
+            raise
+
+    def clear_runtime_context(self) -> None:
+        self.main_runner.clear_all_threads()
+
+    def _build_history_lines(self) -> list[str]:
+        lines: list[str] = []
+
+        for pair in self.conversation_state.recent_dialogue_pairs(limit=4):
+            user = str(pair.get("user", "")).strip()
+            user_text = str(pair.get("input", "")).strip()
+            reply_text = str(pair.get("reply", "")).strip()
+
+            if user_text:
+                lines.append(f"{user or '用户'}: {user_text}")
+            if reply_text:
+                lines.append(f"助手: {reply_text}")
+
+        return lines

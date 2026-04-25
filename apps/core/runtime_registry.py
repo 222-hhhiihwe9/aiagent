@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from apps.core.bootstrap import build_runtime
 from apps.core.runtime import CoreRuntime
 

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import json
 from pathlib import Path
 from typing import Any
@@ -130,20 +132,13 @@ class APIClient:
         )
 
     def get_runtime_snapshot(self, user_id: str) -> dict[str, Any]:
-        health = self.get_health()
-        control = self.get_control_status()
-        voice = self.get_voice_state()
-        memory = self.get_user_memory(user_id)
-        memory_stats = self.get_memory_stats(user_id)
-        knowledge = self.get_knowledge_stats()
-
         return {
-            "health": health,
-            "control": control,
-            "voice": voice,
-            "memory": memory,
-            "memory_stats": memory_stats,
-            "knowledge": knowledge,
+            "health": self.get_health(),
+            "control": self.get_control_status(),
+            "voice": self.get_voice_state(),
+            "memory": self.get_user_memory(user_id),
+            "memory_stats": self.get_memory_stats(user_id),
+            "knowledge": self.get_knowledge_stats(),
         }
 
     def run_startup_check(self, user_id: str) -> dict[str, Any]:
@@ -157,35 +152,18 @@ class APIClient:
 
         overall_ok = True
 
-        try:
-            checks["backend_health"] = self.get_health()
-        except Exception as exc:
-            overall_ok = False
-            checks["backend_health"] = {"ok": False, "error": str(exc)}
-
-        try:
-            checks["control_status"] = self.get_control_status()
-        except Exception as exc:
-            overall_ok = False
-            checks["control_status"] = {"ok": False, "error": str(exc)}
-
-        try:
-            checks["voice_state"] = self.get_voice_state()
-        except Exception as exc:
-            overall_ok = False
-            checks["voice_state"] = {"ok": False, "error": str(exc)}
-
-        try:
-            checks["memory_stats"] = self.get_memory_stats(user_id)
-        except Exception as exc:
-            overall_ok = False
-            checks["memory_stats"] = {"ok": False, "error": str(exc)}
-
-        try:
-            checks["knowledge_stats"] = self.get_knowledge_stats()
-        except Exception as exc:
-            overall_ok = False
-            checks["knowledge_stats"] = {"ok": False, "error": str(exc)}
+        for name, fn in {
+            "backend_health": self.get_health,
+            "control_status": self.get_control_status,
+            "voice_state": self.get_voice_state,
+            "memory_stats": lambda: self.get_memory_stats(user_id),
+            "knowledge_stats": self.get_knowledge_stats,
+        }.items():
+            try:
+                checks[name] = fn()
+            except Exception as exc:
+                overall_ok = False
+                checks[name] = {"ok": False, "error": str(exc)}
 
         return {
             "ok": overall_ok,

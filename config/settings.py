@@ -67,6 +67,18 @@ class Settings(BaseSettings):
     gpt_sovits_prompt_lang: str = Field(default="zh", alias="GPT_SOVITS_PROMPT_LANG")
     gpt_sovits_text_lang: str = Field(default="zh", alias="GPT_SOVITS_TEXT_LANG")
 
+    indextts2_base_url: str = Field(default="http://127.0.0.1:8000", alias="INDEX_TTS2_BASE_URL")
+    indextts2_ref_audio_path: str = Field(default="", alias="INDEX_TTS2_REF_AUDIO_PATH")
+    indextts2_emo_alpha: float = Field(default=0.6, alias="INDEX_TTS2_EMO_ALPHA")
+    indextts2_use_emo_text: bool = Field(default=True, alias="INDEX_TTS2_USE_EMO_TEXT")
+    indextts2_max_segment_length: int = Field(default=20, alias="INDEX_TTS2_MAX_SEGMENT_LENGTH")
+
+    voxcpm_base_url: str = Field(
+        default="https://o6n-imn2w3i0x0vlqyxo7-lq7eqede-custom.service.onethingrobot.com",
+        alias="VOXCPM_BASE_URL",
+    )
+
+    
     asr_provider : str = Field(default="mock",alias = "ASR_PROVIDER")
     enable_mock_asr : bool = Field(default = True,alias = "ENABLE_MOCK_ASR")
     asr_model_size : str = Field(default="medium",alias = "ASR_MODEL_SIZE")

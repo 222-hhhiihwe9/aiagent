@@ -83,4 +83,57 @@ class PlannerGraphResult(BaseModel):
     persona_name:str
     persona_alias:str
     metadata:dict[str,str] =Field(default_factory=dict)
-    
+
+
+# LLM graph
+
+class LLMGraphInput(BaseModel):
+    thread_id: str
+    user_text: str
+    user_name: str = "guest"
+
+    persona_id: str = ""
+    persona_name: str = ""
+    persona_alias: str = ""
+
+    state_emotion: str = ""
+    state_intent: str = ""
+    state_topic: str = ""
+    state_motion_hint: str = ""
+    state_context_summary: str = ""
+    state_confidence: float = 0.0
+    state_reasoning: str = ""
+
+    strategy: str = "chat"
+    should_store_memory: bool = False
+    should_speak: bool = True
+    target_emotion: str = ""
+    target_motion: str = ""
+    target_expression: str = ""
+    reply_instruction: str = ""
+    planner_reasoning: str = ""
+    planner_confidence: float = 0.0
+
+    retrieved_context: list[str] = Field(default_factory=list)
+
+
+class LLMGraphResult(BaseModel):
+    thread_id: str
+    user_text: str
+    user_name: str
+
+    persona_id: str
+    persona_name: str
+    persona_alias: str
+
+    reply_text: str
+    validation_issues: list[str] = Field(default_factory=list)
+
+    should_store_memory: bool = False
+    should_speak: bool = True
+    target_emotion: str = ""
+    target_motion: str = ""
+    target_expression: str = ""
+
+    short_term_messages: list[str] = Field(default_factory=list)
+    metadata: dict[str, str] = Field(default_factory=dict)

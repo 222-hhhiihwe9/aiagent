@@ -1,9 +1,9 @@
 """Output payload schema definitions."""
 from datetime import datetime
-from uuid import uuid4
 from enum import StrEnum
+from uuid import uuid4
 
-from pydantic import BaseModel,Field
+from pydantic import BaseModel, Field
 
 
 class EmotionLabel(StrEnum):
@@ -13,24 +13,27 @@ class EmotionLabel(StrEnum):
     CALM = "calm"
     ANGRY = "angry"
 
+
 class ResponsePacket(BaseModel):
-    reply_text : str
-    base_reply_text : str | None = None
-    emotion : EmotionLabel = EmotionLabel.NEUTRAL
-    should_speak : bool = True
-    should_store_memory : bool = False
+    reply_text: str
+    base_reply_text: str | None = None
+    emotion: EmotionLabel = EmotionLabel.NEUTRAL
+    should_speak: bool = True
+    should_store_memory: bool = False
 
-    motion : str | None = None
-    expression : str | None = None
+    motion: str | None = None
+    expression: str | None = None
 
-    audio_path : str | None = None
+    audio_path: str | None = None
+    audio_segments: list[str] = Field(default_factory=list)
+    audio_segment_texts: list[str] = Field(default_factory=list)
 
-    live2d_command_path : str | None = None
-    
-    metadata: dict[str,str] = Field(default_factory=dict)
+    live2d_command_path: str | None = None
+
+    metadata: dict[str, str] = Field(default_factory=dict)
 
 
 class OutputEvent(BaseModel):
-    output_id : str = Field(default_factory=lambda: str(uuid4()))
-    timestamp : datetime = Field(default_factory=datetime.now)
-    packet : ResponsePacket
+    output_id: str = Field(default_factory=lambda: str(uuid4()))
+    timestamp: datetime = Field(default_factory=datetime.now)
+    packet: ResponsePacket

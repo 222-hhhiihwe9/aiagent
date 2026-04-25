@@ -1,5 +1,6 @@
 """Runtime lifecycle management for the core application."""
 
+from aiagent.brain.agent_core import AgentCore
 from aiagent.brain.dialogue_manager import DialogueManager
 from aiagent.knowledge.rag_pipeline import RAGPipeline
 from aiagent.memory.long_term_memory import LongTermMemory
@@ -22,6 +23,7 @@ class CoreRuntime:
     def __init__(
         self,
         dispatcher: EventDispatcher,
+        agent_core: AgentCore,
         speaking_state: SpeakingState,
         asr_listener: ASRListener,
         stream_state: StreamingState,
@@ -37,6 +39,7 @@ class CoreRuntime:
         voice_session_controller: VoiceSessionController | None = None,
     ) -> None:
         self.dispatcher = dispatcher
+        self.agent_core = agent_core
         self.speaking_state = speaking_state
         self.asr_listener = asr_listener
         self.stream_state = stream_state
@@ -204,10 +207,11 @@ class CoreRuntime:
     def clear_user_memories(self, user_id: str) -> dict[str, str]:
         self.user_profile_memory.clear_user(user_id)
         self.long_term_memory.clear_user(user_id)
+        self.agent_core.main_runner.clear_thread(user_id)
         return {"status": "cleared", "user_id": user_id}
 
     def reset_dialogue_context(self) -> dict[str, str]:
-        self.llm_service.clear_short_term()
+        self.agent_core.clear_runtime_context()
         self.conversation_state.clear()
         return {"status": "reset"}
 

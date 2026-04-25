@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import json
 import logging
 import traceback
@@ -111,21 +113,26 @@ def voice_turn(req: VoiceTurnRequest):
             interrupt_playback=req.interrupt_playback,
         )
 
+        packet = output.packet
+
         body = json.dumps(
             {
                 "ok": True,
-                "reply": output.packet.reply_text,
-                "base_reply_text": output.packet.base_reply_text,
-                "emotion": output.packet.emotion,
-                "motion": output.packet.motion,
-                "expression": output.packet.expression,
-                "audio_path": output.packet.audio_path,
-                "live2d_command_path": output.packet.live2d_command_path,
-                "metadata": output.packet.metadata,
+                "reply": packet.reply_text,
+                "base_reply_text": packet.base_reply_text,
+                "emotion": packet.emotion,
+                "motion": packet.motion,
+                "expression": packet.expression,
+                "audio_path": packet.audio_path,
+                "audio_segments": packet.audio_segments,
+                "audio_segment_texts": packet.audio_segment_texts,
+                "live2d_command_path": packet.live2d_command_path,
+                "metadata": packet.metadata,
                 "stream_state": runtime.get_stream_state().model_dump(),
                 "speaking_state": runtime.get_speaking_state().model_dump(),
             },
             ensure_ascii=False,
+            default=str,
         )
 
         return Response(
@@ -195,13 +202,18 @@ def voice_state():
         return error_response
 
     try:
+        speaking_state = runtime.get_speaking_state()
         body = json.dumps(
             {
                 "ok": True,
                 "stream_state": runtime.get_stream_state().model_dump(),
-                "speaking_state": runtime.get_speaking_state().model_dump(),
+                "speaking_state": speaking_state.model_dump(),
+                "current_audio_queue": runtime.voice_session_controller.audio_playback_dispatcher.audio_player.get_current_playlist()
+                if runtime.voice_session_controller is not None
+                else [],
             },
             ensure_ascii=False,
+            default=str,
         )
         return Response(
             content=body,
