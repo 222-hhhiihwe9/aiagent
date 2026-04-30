@@ -113,6 +113,9 @@ class APIClient:
     def get_knowledge_stats(self) -> dict[str, Any]:
         return self._request("GET", "/knowledge/stats")
 
+    def get_knowledge_rebuild_status(self) -> dict[str, Any]:
+        return self._request("GET", "/knowledge/rebuild/status")
+
     def search_knowledge(self, query: str, top_k: int = 4) -> dict[str, Any]:
         return self._request(
             "POST",
@@ -124,11 +127,14 @@ class APIClient:
             },
         )
 
-    def rebuild_knowledge(self, force_rebuild: bool = True) -> dict[str, Any]:
+    def rebuild_knowledge(self, force_rebuild: bool = True, async_rebuild: bool = True) -> dict[str, Any]:
         return self._request(
             "POST",
             "/knowledge/rebuild",
-            json_body={"force_rebuild": force_rebuild},
+            json_body={
+                "force_rebuild": force_rebuild,
+                "async_rebuild": async_rebuild,
+            },
         )
 
     def get_runtime_snapshot(self, user_id: str) -> dict[str, Any]:
@@ -139,6 +145,7 @@ class APIClient:
             "memory": self.get_user_memory(user_id),
             "memory_stats": self.get_memory_stats(user_id),
             "knowledge": self.get_knowledge_stats(),
+            "knowledge_rebuild": self.get_knowledge_rebuild_status(),
         }
 
     def run_startup_check(self, user_id: str) -> dict[str, Any]:
@@ -148,6 +155,7 @@ class APIClient:
             "voice_state": {"ok": False},
             "memory_stats": {"ok": False},
             "knowledge_stats": {"ok": False},
+            "knowledge_rebuild_status": {"ok": False},
         }
 
         overall_ok = True
@@ -158,6 +166,7 @@ class APIClient:
             "voice_state": self.get_voice_state,
             "memory_stats": lambda: self.get_memory_stats(user_id),
             "knowledge_stats": self.get_knowledge_stats,
+            "knowledge_rebuild_status": self.get_knowledge_rebuild_status,
         }.items():
             try:
                 checks[name] = fn()

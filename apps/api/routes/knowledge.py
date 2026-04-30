@@ -15,22 +15,44 @@ class KnowledgeSearchRequest(BaseModel):
 
 class KnowledgeRebuildRequest(BaseModel):
     force_rebuild: bool = True
+    async_rebuild: bool = True
 
 @router.get("/knowledge/stats")
 def knowledge_stats():
     runtime = get_runtime()
+
     body = json.dumps(
         {
             "ok": True,
             "stats": runtime.get_knowledge_stats(),
         },
         ensure_ascii=False,
+        default=str
     )
     return Response(content=body,media_type="application/json; charset=utf-8")
+
+@router.get("/knowledge/rebuild/status")
+def knowledge_rebuild_status():
+    runtime = get_runtime()
+
+    body = json.dumps(
+        {
+            "ok":True,
+            "status":runtime.get_knowledge_rebuild_status(),
+        },
+        ensure_ascii=False,
+        default=str,
+    )
+
+    return Response(
+        content=body,
+        media_type="application/json;charset=utf-8",
+    )
 
 @router.post("/knowledge/search")
 def knowledge_search(req: KnowledgeSearchRequest):
     runtime = get_runtime()
+
     chunks = runtime.search_knowledge(
         query=req.query,
         top_k=req.top_k,
@@ -49,22 +71,32 @@ def knowledge_search(req: KnowledgeSearchRequest):
             top_k=req.top_k,
         )
 
-    body = json.dumps(body,ensure_ascii=False)
+    body = json.dumps(body,ensure_ascii=False,default=str)
     return Response(content=body,media_type="application/json; charset=utf-8")
 
 
 @router.post("/knowledge/rebuild")
 def knowledge_rebuild(req: KnowledgeRebuildRequest):
     runtime = get_runtime()
-    stats = runtime.rebuild_knowledge_index(force_rebuild=req.force_rebuild)
+
+    if req.async_rebuild:
+        body = {
+            "ok": True,
+            "mode": "async",
+            "status": runtime.rebuild_knowledge_index_async(
+                force_rebuild=req.force_rebuild,
+            ),
+        }
+    else:
+        body = {
+            "ok": True,
+            "mode": "sync",
+            "stats": runtime.rebuild_knowledge_index(
+                force_rebuild=req.force_rebuild,
+            ),
+        }
 
     return Response(
-        content = json.dumps(
-            {
-                "ok": True,
-                "stats": stats
-            },
-            ensure_ascii=False
-        )
-        ,media_type="application/json; charset=utf-8"
+        content=json.dumps(body, ensure_ascii=False, default=str),
+        media_type="application/json; charset=utf-8",
     )

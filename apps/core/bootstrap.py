@@ -12,19 +12,16 @@ from aiagent.expression.output_broadcaster import OutputBroadcaster
 from aiagent.expression.tts_dispatcher import TTSDispatcher
 from aiagent.graphs.llm_graph import LLMRunner
 from aiagent.graphs.main_graph import MainRunner
+from aiagent.graphs.memory_graph import MemoryRunner
 from aiagent.graphs.planner_graph import PlannerRunner
-from aiagent.graphs.state_graph import StateRunner
 from aiagent.graphs.rag_graph import RAGRunner
+from aiagent.graphs.state_graph import StateRunner
 from aiagent.knowledge.document_loader import DocumentLoader
 from aiagent.knowledge.rag_pipeline import RAGPipeline
 from aiagent.knowledge.reranker import SimpleReranker
 from aiagent.knowledge.retriever import HybridRetriever
 from aiagent.knowledge.vector_store import LangChainVectorStore
-from aiagent.memory.long_term_memory import LongTermMemory
-from aiagent.memory.memory_selector import MemorySelector
-from aiagent.memory.memory_store import MemoryStore
-from aiagent.memory.memory_summarizer import MemorySummarizer
-from aiagent.memory.user_profile_memory import UserProfileMemory
+from aiagent.memory.mem0_memory import Mem0LongTermMemory
 from aiagent.orchestrator.dispatcher import EventDispatcher
 from aiagent.orchestrator.event_bus import EventBus
 from aiagent.orchestrator.interrupt_manager import InterruptManager
@@ -38,6 +35,7 @@ from aiagent.perception.voice_turn_manager import VoiceTurnManager
 from aiagent.persona.persona_loader import PersonaLoader
 from aiagent.persona.persona_manager import PersonaManager
 from aiagent.services.llm_service import LLMService
+from aiagent.services.memory_policy_llm_service import MemoryPolicyLLMService
 from aiagent.services.planner_llm_service import PlannerLLMService
 from aiagent.services.state_llm_service import StateLLMService
 from aiagent.state.agent_state import AgentRuntimeState
@@ -60,6 +58,26 @@ from integrations.tts.mock_tts_client import MockTTSClient
 from integrations.tts.voxcpm_client import VoxCPMClient
 
 
+def _resolve_env_secret(value: str | None) -> str | None:
+    if value is None:
+        return None
+
+    import os
+
+    candidate = value.strip()
+    if not candidate:
+        return None
+
+    env_value = os.getenv(candidate)
+    if env_value:
+        return env_value.strip()
+
+    if candidate.lower().startswith(("sk-", "sk_", "api-", "pk-")):
+        return candidate
+
+    return None
+
+
 def build_runtime() -> CoreRuntime:
     setup_logger(settings.log_level)
 
@@ -68,12 +86,6 @@ def build_runtime() -> CoreRuntime:
     emotion_state = EmotionState()
     speaking_state = SpeakingState()
     streaming_state = StreamingState()
-
-    user_profile_memory = UserProfileMemory()
-    long_term_memory = LongTermMemory()
-    memory_store = MemoryStore()
-    memory_selector = MemorySelector()
-    memory_summarizer = MemorySummarizer()
 
     dialogue_manager = DialogueManager()
     interrupt_manager = InterruptManager()
@@ -87,6 +99,20 @@ def build_runtime() -> CoreRuntime:
         vector_store=LangChainVectorStore(
             embedding_model_name=settings.rag_embedding_model_name,
             embedding_model_path=settings.rag_embedding_model_path,
+            device=settings.rag_embedding_device,
+            local_files_only=settings.rag_embedding_local_files_only,
+            embedding_provider=settings.rag_embedding_provider,
+            embedding_api_key=_resolve_env_secret(settings.rag_embedding_api_key_env),
+            embedding_base_url=(
+                settings.rag_embedding_base_url
+                or (
+                    settings.siliconflow_base_url
+                    if settings.rag_embedding_provider.strip().lower() == "siliconflow"
+                    else None
+                )
+            ),
+            embedding_batch_size=settings.rag_embedding_batch_size,
+            embedding_dimensions=settings.rag_embedding_dimensions,
         ),
         reranker=SimpleReranker(),
         chunk_size=settings.rag_chunk_size,
@@ -94,34 +120,58 @@ def build_runtime() -> CoreRuntime:
         final_top_k=settings.rag_final_top_k,
     )
     rag_pipeline.build_index(force_rebuild=False)
-    
+
     rag_runner = RAGRunner(
-    rag_pipeline=rag_pipeline,
-    top_k=settings.rag_final_top_k,
-    min_cosine_score=0.42,
-    require_relevance=True,
-)
+        rag_pipeline=rag_pipeline,
+        top_k=settings.rag_final_top_k,
+        min_cosine_score=0.42,
+        require_relevance=True,
+    )
 
     state_llm_service = StateLLMService(settings=settings)
-    state_analyzer = StateAnalyzer(llm_service=state_llm_service)
-    state_normalizer = StateNormalizer()
     state_runner = StateRunner(
-        state_analyzer=state_analyzer,
-        state_normalizer=state_normalizer,
+        state_analyzer=StateAnalyzer(llm_service=state_llm_service),
+        state_normalizer=StateNormalizer(),
     )
 
     planner_llm_service = PlannerLLMService(settings=settings)
-    planner_reply = ReplyPlanner(llm_service=planner_llm_service)
-    planner_normalizer = PlannerNormalizer()
     planner_runner = PlannerRunner(
-        planner_reply=planner_reply,
-        planner_normalizer=planner_normalizer,
+        planner_reply=ReplyPlanner(llm_service=planner_llm_service),
+        planner_normalizer=PlannerNormalizer(),
     )
 
     llm_service = LLMService(settings=settings)
-    llm_runner = LLMRunner(
-        llm_service=llm_service,
-        short_term_turn_window=6,
+    llm_runner = LLMRunner(llm_service=llm_service, short_term_turn_window=6)
+
+    long_term_memory = Mem0LongTermMemory(
+        llm_provider=settings.memory_llm_provider,
+        llm_model=settings.memory_llm_model,
+        llm_api_key_env=settings.memory_llm_api_key_env,
+        embedder_provider=settings.memory_embedder_provider,
+        embedder_model=settings.memory_embedder_model,
+        embedder_api_key_env=settings.memory_embedder_api_key_env,
+        embedder_base_url=(
+            settings.siliconflow_base_url
+            if settings.memory_embedder_provider.strip().lower() == "siliconflow"
+            else None
+        ),
+        vector_provider=settings.memory_vector_provider,
+        vector_collection=settings.memory_vector_collection,
+        embedding_dims=settings.memory_embedding_dims,
+        qdrant_host=settings.qdrant_host,
+        qdrant_port=settings.qdrant_port,
+        enable_graph=settings.memory_enable_graph,
+        graph_provider=settings.memory_graph_provider,
+        graph_url=settings.neo4j_url,
+        graph_username=settings.neo4j_username,
+        graph_password=settings.neo4j_password,
+        graph_database=settings.neo4j_database,
+        reset_vector_store=settings.memory_reset_vector_store,
+    )
+
+    memory_runner = MemoryRunner(
+        memory=long_term_memory,
+        policy_service=MemoryPolicyLLMService(llm_service=llm_service),
     )
 
     main_runner = MainRunner(
@@ -129,6 +179,7 @@ def build_runtime() -> CoreRuntime:
         planner_runner=planner_runner,
         llm_runner=llm_runner,
         rag_runner=rag_runner,
+        memory_runner=memory_runner,
     )
 
     persona_loader = PersonaLoader()
@@ -141,39 +192,31 @@ def build_runtime() -> CoreRuntime:
         emotion_state=emotion_state,
     )
 
-    mock_tts_client = MockTTSClient()
-
-    gpt_sovits_client = GPTSoVITSClient(
-        base_url=settings.gpt_sovits_base_url,
-        timeout_seconds=settings.tts_timeout_seconds,
-        ref_audio_path=settings.gpt_sovits_ref_audio_path,
-        prompt_text=settings.gpt_sovits_prompt_text,
-        prompt_lang=settings.gpt_sovits_prompt_lang,
-        text_lang=settings.gpt_sovits_text_lang,
-    )
-
-    index_tts2_client = IndexTTS2Client(
-        base_url=settings.indextts2_base_url,
-        ref_audio_path=settings.indextts2_ref_audio_path,
-        emo_alpha=settings.indextts2_emo_alpha,
-        use_emo_text=settings.indextts2_use_emo_text,
-        max_segment_length=settings.indextts2_max_segment_length,
-        timeout_seconds=settings.tts_timeout_seconds,
-    )
-
-    voxcpm_client = VoxCPMClient(
-        base_url=settings.voxcpm_base_url,
-        timeout_seconds=settings.tts_timeout_seconds,
-    )
-
     tts_dispatcher = TTSDispatcher(
-        mock_tts_client=mock_tts_client,
+        mock_tts_client=MockTTSClient(),
         speaking_state=speaking_state,
         tts_provider=settings.tts_provider,
         enable_mock_tts=settings.enable_mock_tts,
-        gpt_sovits_client=gpt_sovits_client,
-        index_tts2_client=index_tts2_client,
-        voxcpm_client=voxcpm_client,
+        gpt_sovits_client=GPTSoVITSClient(
+            base_url=settings.gpt_sovits_base_url,
+            timeout_seconds=settings.tts_timeout_seconds,
+            ref_audio_path=settings.gpt_sovits_ref_audio_path,
+            prompt_text=settings.gpt_sovits_prompt_text,
+            prompt_lang=settings.gpt_sovits_prompt_lang,
+            text_lang=settings.gpt_sovits_text_lang,
+        ),
+        index_tts2_client=IndexTTS2Client(
+            base_url=settings.indextts2_base_url,
+            ref_audio_path=settings.indextts2_ref_audio_path,
+            emo_alpha=settings.indextts2_emo_alpha,
+            use_emo_text=settings.indextts2_use_emo_text,
+            max_segment_length=settings.indextts2_max_segment_length,
+            timeout_seconds=settings.tts_timeout_seconds,
+        ),
+        voxcpm_client=VoxCPMClient(
+            base_url=settings.voxcpm_base_url,
+            timeout_seconds=settings.tts_timeout_seconds,
+        ),
     )
 
     audio_playback_dispatcher = AudioPlaybackDispatcher(
@@ -181,13 +224,10 @@ def build_runtime() -> CoreRuntime:
         speaking_state=speaking_state,
     )
 
-    live2d_dispatcher = Live2DDispatcher(client=MockLive2DClient())
-    motion_policy = MotionPolicy()
-
     output_broadcaster = OutputBroadcaster(
         tts_dispatcher=tts_dispatcher,
-        live2d_dispatcher=live2d_dispatcher,
-        motion_policy=motion_policy,
+        live2d_dispatcher=Live2DDispatcher(client=MockLive2DClient()),
+        motion_policy=MotionPolicy(),
         audio_playback_dispatcher=audio_playback_dispatcher,
     )
 
@@ -202,26 +242,11 @@ def build_runtime() -> CoreRuntime:
             language=settings.asr_language,
         )
 
-    fixed_recorder = MicrophoneRecorder(
-        sample_rate=settings.asr_sample_rate,
-        channels=1,
-    )
-
     asr_listener = ASRListener(
         asr_client=asr_client,
-        recorder=fixed_recorder,
+        recorder=MicrophoneRecorder(sample_rate=settings.asr_sample_rate, channels=1),
         asr_provider=settings.asr_provider,
         enable_mock_asr=settings.enable_mock_asr,
-    )
-
-    vad = VoiceActivityDetector(
-        energy_threshold=settings.voice_energy_threshold,
-    )
-    streaming_microphone = StreamingMicrophone(
-        sample_rate=settings.asr_sample_rate,
-        channels=1,
-        chunk_seconds=settings.voice_chunk_seconds,
-        vad=vad,
     )
 
     voice_session_controller = VoiceSessionController(
@@ -232,13 +257,17 @@ def build_runtime() -> CoreRuntime:
 
     voice_turn_manager = VoiceTurnManager(
         asr_listener=asr_listener,
-        microphone=streaming_microphone,
+        microphone=StreamingMicrophone(
+            sample_rate=settings.asr_sample_rate,
+            channels=1,
+            chunk_seconds=settings.voice_chunk_seconds,
+            vad=VoiceActivityDetector(energy_threshold=settings.voice_energy_threshold),
+        ),
         stream_state=streaming_state,
         session_controller=voice_session_controller,
     )
 
-    input_normalizer = InputNormalizer()
-    source_router = SourceRouter(input_normalizer=input_normalizer)
+    source_router = SourceRouter(input_normalizer=InputNormalizer())
 
     dispatcher = EventDispatcher(
         event_bus=EventBus(),
@@ -247,11 +276,6 @@ def build_runtime() -> CoreRuntime:
         agent_core=agent_core,
         persona_manager=persona_manager,
         output_broadcaster=output_broadcaster,
-        memory_store=memory_store,
-        memory_selector=memory_selector,
-        memory_summarizer=memory_summarizer,
-        long_term_memory=long_term_memory,
-        user_profile_memory=user_profile_memory,
         agent_state=agent_state,
         conversation_state=conversation_state,
         dialogue_manager=dialogue_manager,
@@ -265,7 +289,7 @@ def build_runtime() -> CoreRuntime:
         asr_listener=asr_listener,
         stream_state=streaming_state,
         long_term_memory=long_term_memory,
-        user_profile_memory=user_profile_memory,
+        memory_runner=memory_runner,
         source_router=source_router,
         llm_service=llm_service,
         conversation_state=conversation_state,

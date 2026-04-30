@@ -1,11 +1,6 @@
 from aiagent.brain.agent_core import AgentCore
 from aiagent.brain.dialogue_manager import DialogueManager
 from aiagent.expression.output_broadcaster import OutputBroadcaster
-from aiagent.memory.long_term_memory import LongTermMemory
-from aiagent.memory.memory_selector import MemorySelector
-from aiagent.memory.memory_store import MemoryStore
-from aiagent.memory.memory_summarizer import MemorySummarizer
-from aiagent.memory.user_profile_memory import UserProfileMemory
 from aiagent.orchestrator.event_bus import EventBus
 from aiagent.orchestrator.interrupt_manager import InterruptManager
 from aiagent.orchestrator.scheduler import Scheduler
@@ -13,7 +8,6 @@ from aiagent.orchestrator.session_manager import SessionManager
 from aiagent.persona.persona_manager import PersonaManager
 from aiagent.schemas.events import SystemEvent, SystemEventType
 from aiagent.schemas.inputs import InputEvent
-from aiagent.schemas.memory import MemoryKind
 from aiagent.schemas.outputs import OutputEvent
 from aiagent.state.agent_state import AgentRuntimeState
 from aiagent.state.conversation_state import ConversationState
@@ -28,11 +22,6 @@ class EventDispatcher:
         agent_core: AgentCore,
         persona_manager: PersonaManager,
         output_broadcaster: OutputBroadcaster,
-        memory_store: MemoryStore,
-        memory_selector: MemorySelector,
-        memory_summarizer: MemorySummarizer,
-        long_term_memory: LongTermMemory,
-        user_profile_memory: UserProfileMemory,
         agent_state: AgentRuntimeState,
         conversation_state: ConversationState,
         dialogue_manager: DialogueManager,
@@ -44,11 +33,6 @@ class EventDispatcher:
         self.agent_core = agent_core
         self.persona_manager = persona_manager
         self.output_broadcaster = output_broadcaster
-        self.memory_store = memory_store
-        self.memory_selector = memory_selector
-        self.memory_summarizer = memory_summarizer
-        self.long_term_memory = long_term_memory
-        self.user_profile_memory = user_profile_memory
         self.agent_state = agent_state
         self.conversation_state = conversation_state
         self.dialogue_manager = dialogue_manager
@@ -84,11 +68,15 @@ class EventDispatcher:
             raise ValueError("Empty input event cannot be processed.")
 
         persona = self.persona_manager.get_active_persona()
-        packet = self.agent_core.process(event, persona)
+        packet = self.agent_core.main_runner.run(
+            event=event,
+            persona_runtime=persona,
+            history=self.agent_core._build_history_lines(),
+            session_id=session_id,
+        )
         output = OutputEvent(packet=packet)
 
         output = self.output_broadcaster.broadcast(output)
-        self._store_memories(event, output)
 
         self.agent_state.last_output_id = output.output_id
         self.conversation_state.add_output(output)
@@ -99,37 +87,11 @@ class EventDispatcher:
                 event_type=SystemEventType.RESPONSE_READY,
                 payload={
                     "output_id": output.output_id,
-                    "reply_text": packet.reply_text,
-                    "base_reply_text": packet.base_reply_text or "",
-                    "audio_path": packet.audio_path or "",
+                    "reply_text": output.packet.reply_text,
+                    "base_reply_text": output.packet.base_reply_text or "",
+                    "audio_path": output.packet.audio_path or "",
                 },
             )
         )
 
         return output
-
-    def _store_memories(self, event: InputEvent, output: OutputEvent) -> None:
-        profile_items = self.memory_selector.extract_profile_memories(event)
-        self.memory_store.store_profile_memories(
-            user_profile_memory=self.user_profile_memory,
-            items=profile_items,
-        )
-
-        long_term_items = self.memory_selector.extract_long_term_memories(event, output)
-        stored_count = self.memory_store.store_long_term_memories(
-            long_term_memory=self.long_term_memory,
-            items=long_term_items,
-        )
-
-        if stored_count > 0:
-            summary_source_items = self.long_term_memory.recall_for_user(
-                user_id=event.user_id,
-                limit=12,
-                kinds=[MemoryKind.USER_PORFILE, MemoryKind.LONG_TERM],
-            )
-            summary_text = self.memory_summarizer.summarize_user_memories(summary_source_items)
-            self.long_term_memory.replace_user_summary(
-                user_id=event.user_id,
-                username=event.user_name,
-                summary_text=summary_text,
-            )

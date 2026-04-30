@@ -35,8 +35,7 @@ class Worker(QObject):
     @Slot()
     def run(self) -> None:
         try:
-            result = self.fn()
-            self.finished.emit(result)
+            self.finished.emit(self.fn())
         except Exception as exc:
             self.error.emit(f"{exc}\n\n{traceback.format_exc()}")
 
@@ -56,27 +55,26 @@ class ChatBubble(QFrame):
         text_label = QLabel(text)
         text_label.setWordWrap(True)
         text_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        text_label.setStyleSheet("font-size: 14px; line-height: 1.5; color: #1f1f1f;")
+        text_label.setStyleSheet("font-size: 14px; color: #1f1f1f;")
         layout.addWidget(text_label)
 
+        self.setMaximumWidth(430 if align == "right" else 580)
         self.setStyleSheet(
             f"""
             QFrame {{
                 background: {bubble_color};
-                border: 1px solid rgba(60, 60, 60, 0.08);
-                border-radius: 16px;
+                border: 1px solid rgba(60, 60, 60, 0.10);
+                border-radius: 12px;
             }}
             """
         )
-
-        self.setMaximumWidth(420 if align == "right" else 560)
 
 
 class ChatWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
 
-        self.setWindowTitle("AIAgent Desktop Panel")
+        self.setWindowTitle("AIAgent Desktop Debug Panel")
         self.resize(1480, 920)
 
         self.identity_store = DesktopIdentityStore()
@@ -88,12 +86,10 @@ class ChatWindow(QMainWindow):
 
         self.current_thread: QThread | None = None
         self.current_worker: Worker | None = None
-        self.current_task_name: str = ""
+        self.current_task_name = ""
 
         self._build_ui()
-        self._append_system_message(
-            f"桌面端已启动，当前身份为 {self.username}。现在可以直接观察 state / planner / llm 的调试输出。"
-        )
+        self._append_system_message(f"桌面调试台已启动。当前用户：{self.username}。")
         self._set_status("就绪")
         self.run_startup_check()
 
@@ -130,7 +126,6 @@ class ChatWindow(QMainWindow):
 
         outer_layout = QVBoxLayout(root)
         outer_layout.setContentsMargins(18, 18, 18, 18)
-        outer_layout.setSpacing(0)
 
         splitter = QSplitter(Qt.Horizontal)
         splitter.setChildrenCollapsible(False)
@@ -138,7 +133,7 @@ class ChatWindow(QMainWindow):
         splitter.addWidget(self._build_right_panel())
         splitter.setStretchFactor(0, 5)
         splitter.setStretchFactor(1, 4)
-        splitter.setSizes([920, 720])
+        splitter.setSizes([900, 700])
 
         outer_layout.addWidget(splitter)
 
@@ -149,9 +144,28 @@ class ChatWindow(QMainWindow):
                 font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
             }
             QFrame#leftPanel, QFrame#rightPanel {
-                background: rgba(255, 252, 247, 0.92);
+                background: rgba(255, 252, 247, 0.94);
                 border: 1px solid #d8ccbf;
-                border-radius: 22px;
+                border-radius: 12px;
+            }
+            QPushButton {
+                min-height: 34px;
+                border-radius: 8px;
+                border: 1px solid #b8aa9b;
+                background: #fffaf2;
+                color: #2f241f;
+                font-weight: 700;
+            }
+            QPushButton:disabled {
+                color: #9a9188;
+                background: #e6ded5;
+            }
+            QTextEdit {
+                border: 1px solid #d3c5b6;
+                border-radius: 8px;
+                background: #fffdf9;
+                color: #1f1f1f;
+                padding: 8px;
             }
             """
         )
@@ -162,16 +176,16 @@ class ChatWindow(QMainWindow):
 
         layout = QVBoxLayout(left_panel)
         layout.setContentsMargins(18, 18, 18, 18)
-        layout.setSpacing(14)
+        layout.setSpacing(12)
 
         title_label = QLabel("Yzl 对话窗口")
-        title_label.setStyleSheet("font-size: 28px; font-weight: 800; color: #2f241f;")
+        title_label.setStyleSheet("font-size: 26px; font-weight: 800; color: #2f241f;")
         layout.addWidget(title_label)
 
         self.identity_label = QLabel(
             f"当前用户：{self.username}\n用户ID：{self.user_id}\n服务端：{self.api_base_url}"
         )
-        self.identity_label.setStyleSheet("font-size: 13px; color: #6f6258; line-height: 1.6;")
+        self.identity_label.setStyleSheet("font-size: 13px; color: #6f6258;")
         layout.addWidget(self.identity_label)
 
         self.chat_scroll = QScrollArea()
@@ -184,7 +198,6 @@ class ChatWindow(QMainWindow):
         self.chat_layout.setContentsMargins(8, 8, 8, 8)
         self.chat_layout.setSpacing(12)
         self.chat_layout.addStretch()
-
         self.chat_scroll.setWidget(self.chat_container)
         layout.addWidget(self.chat_scroll, 1)
 
@@ -194,27 +207,25 @@ class ChatWindow(QMainWindow):
 
         self.input_edit = QTextEdit()
         self.input_edit.setPlaceholderText("输入你想说的话……")
-        self.input_edit.setMinimumHeight(130)
-        self.input_edit.setMaximumHeight(220)
+        self.input_edit.setMinimumHeight(120)
+        self.input_edit.setMaximumHeight(190)
         layout.addWidget(self.input_edit)
 
-        input_button_row = QHBoxLayout()
-        input_button_row.setSpacing(10)
-
+        button_row = QHBoxLayout()
         self.send_button = QPushButton("发送消息")
         self.send_button.clicked.connect(self.send_text_message)
-        input_button_row.addWidget(self.send_button)
+        button_row.addWidget(self.send_button)
 
         self.start_record_button = QPushButton("开始录音")
         self.start_record_button.clicked.connect(self.start_voice_recording)
-        input_button_row.addWidget(self.start_record_button)
+        button_row.addWidget(self.start_record_button)
 
         self.stop_record_button = QPushButton("结束录音")
         self.stop_record_button.clicked.connect(self.stop_voice_recording)
         self.stop_record_button.setDisabled(True)
-        input_button_row.addWidget(self.stop_record_button)
+        button_row.addWidget(self.stop_record_button)
 
-        layout.addLayout(input_button_row)
+        layout.addLayout(button_row)
         return left_panel
 
     def _build_right_panel(self) -> QWidget:
@@ -228,16 +239,12 @@ class ChatWindow(QMainWindow):
         tools_scroll = QScrollArea()
         tools_scroll.setWidgetResizable(True)
         tools_scroll.setFrameShape(QFrame.NoFrame)
-        tools_scroll.setStyleSheet("QScrollArea { background: transparent; border: none; }")
 
         tools_content = QWidget()
         tools_layout = QVBoxLayout(tools_content)
-        tools_layout.setContentsMargins(0, 0, 4, 0)
         tools_layout.setSpacing(12)
 
         control_card = self._build_section_card("快捷控制")
-        control_layout = control_card.layout()
-
         control_grid = QGridLayout()
         control_grid.setHorizontalSpacing(10)
         control_grid.setVerticalSpacing(10)
@@ -270,86 +277,57 @@ class ChatWindow(QMainWindow):
         self.clear_memory_button.clicked.connect(self.clear_memory)
         control_grid.addWidget(self.clear_memory_button, 3, 0)
 
-        self.clear_chat_button = QPushButton("清空聊天窗口")
+        self.clear_chat_button = QPushButton("清空聊天")
         self.clear_chat_button.clicked.connect(self.clear_chat)
         control_grid.addWidget(self.clear_chat_button, 3, 1)
 
-        control_layout.addLayout(control_grid)
+        control_card.layout().addLayout(control_grid)
         tools_layout.addWidget(control_card)
 
         knowledge_card = self._build_section_card("知识库调试")
-        knowledge_layout = knowledge_card.layout()
-
         self.knowledge_query_edit = QTextEdit()
-        self.knowledge_query_edit.setPlaceholderText("输入一个问题，测试知识库命中效果……")
-        self.knowledge_query_edit.setMinimumHeight(76)
-        self.knowledge_query_edit.setMaximumHeight(110)
-        knowledge_layout.addWidget(self.knowledge_query_edit)
+        self.knowledge_query_edit.setPlaceholderText("输入问题，测试知识库召回……")
+        self.knowledge_query_edit.setMaximumHeight(100)
+        knowledge_card.layout().addWidget(self.knowledge_query_edit)
 
-        knowledge_button_row = QHBoxLayout()
+        knowledge_buttons = QHBoxLayout()
         self.search_knowledge_button = QPushButton("检索知识")
         self.search_knowledge_button.clicked.connect(self.search_knowledge)
-        knowledge_button_row.addWidget(self.search_knowledge_button)
+        knowledge_buttons.addWidget(self.search_knowledge_button)
 
         self.rebuild_knowledge_button = QPushButton("重建索引")
         self.rebuild_knowledge_button.clicked.connect(self.rebuild_knowledge)
-        knowledge_button_row.addWidget(self.rebuild_knowledge_button)
+        knowledge_buttons.addWidget(self.rebuild_knowledge_button)
 
-        knowledge_layout.addLayout(knowledge_button_row)
+        self.knowledge_stats_button = QPushButton("索引状态")
+        self.knowledge_stats_button.clicked.connect(self.load_knowledge_stats)
+        knowledge_buttons.addWidget(self.knowledge_stats_button)
+
+        knowledge_card.layout().addLayout(knowledge_buttons)
         tools_layout.addWidget(knowledge_card)
 
-        memory_card = self._build_section_card("记忆检索")
-        memory_layout = memory_card.layout()
-
+        memory_card = self._build_section_card("记忆调试")
         self.memory_query_edit = QTextEdit()
-        self.memory_query_edit.setPlaceholderText("输入关键词，搜索当前用户的记忆……")
-        self.memory_query_edit.setMinimumHeight(76)
-        self.memory_query_edit.setMaximumHeight(110)
-        memory_layout.addWidget(self.memory_query_edit)
+        self.memory_query_edit.setPlaceholderText("输入关键词，搜索当前用户的长期记忆……")
+        self.memory_query_edit.setMaximumHeight(100)
+        memory_card.layout().addWidget(self.memory_query_edit)
 
-        memory_button_row = QHBoxLayout()
+        memory_buttons = QHBoxLayout()
         self.search_memory_button = QPushButton("搜索记忆")
         self.search_memory_button.clicked.connect(self.search_memory)
-        memory_button_row.addWidget(self.search_memory_button)
+        memory_buttons.addWidget(self.search_memory_button)
 
         self.memory_stats_button = QPushButton("记忆统计")
         self.memory_stats_button.clicked.connect(self.load_memory_stats)
-        memory_button_row.addWidget(self.memory_stats_button)
+        memory_buttons.addWidget(self.memory_stats_button)
 
-        memory_layout.addLayout(memory_button_row)
+        memory_card.layout().addLayout(memory_buttons)
         tools_layout.addWidget(memory_card)
 
-        state_graph_card = self._build_section_card("State Graph")
-        state_graph_layout = state_graph_card.layout()
-        self.state_graph_view = QTextEdit()
-        self.state_graph_view.setReadOnly(True)
-        self.state_graph_view.setMinimumHeight(220)
-        state_graph_layout.addWidget(self.state_graph_view)
-        tools_layout.addWidget(state_graph_card)
-
-        planner_graph_card = self._build_section_card("Planner Graph")
-        planner_graph_layout = planner_graph_card.layout()
-        self.planner_graph_view = QTextEdit()
-        self.planner_graph_view.setReadOnly(True)
-        self.planner_graph_view.setMinimumHeight(220)
-        planner_graph_layout.addWidget(self.planner_graph_view)
-        tools_layout.addWidget(planner_graph_card)
-
-        detail_card = self._build_section_card("LLM / API Detail")
-        detail_layout = detail_card.layout()
-        self.detail_view = QTextEdit()
-        self.detail_view.setReadOnly(True)
-        self.detail_view.setMinimumHeight(220)
-        detail_layout.addWidget(self.detail_view)
-        tools_layout.addWidget(detail_card)
-
-        state_card = self._build_section_card("Runtime Snapshot")
-        state_layout = state_card.layout()
-        self.state_view = QTextEdit()
-        self.state_view.setReadOnly(True)
-        self.state_view.setMinimumHeight(220)
-        state_layout.addWidget(self.state_view)
-        tools_layout.addWidget(state_card)
+        self.live2d_view = self._build_text_panel(tools_layout, "Live2D Payload", 170)
+        self.memory_view = self._build_text_panel(tools_layout, "Memory Status", 170)
+        self.detail_view = self._build_text_panel(tools_layout, "API Detail", 260)
+        self.state_view = self._build_text_panel(tools_layout, "Runtime Snapshot", 260)
 
         tools_layout.addStretch()
         tools_scroll.setWidget(tools_content)
@@ -360,13 +338,22 @@ class ChatWindow(QMainWindow):
     def _build_section_card(self, title: str) -> QFrame:
         card = QFrame()
         layout = QVBoxLayout(card)
-        layout.setContentsMargins(16, 14, 16, 14)
-        layout.setSpacing(12)
+        layout.setContentsMargins(14, 12, 14, 12)
+        layout.setSpacing(10)
 
         title_label = QLabel(title)
-        title_label.setStyleSheet("font-size: 18px; font-weight: 800; color: #2f241f;")
+        title_label.setStyleSheet("font-size: 17px; font-weight: 800; color: #2f241f;")
         layout.addWidget(title_label)
         return card
+
+    def _build_text_panel(self, parent_layout: QVBoxLayout, title: str, height: int) -> QTextEdit:
+        card = self._build_section_card(title)
+        view = QTextEdit()
+        view.setReadOnly(True)
+        view.setMinimumHeight(height)
+        card.layout().addWidget(view)
+        parent_layout.addWidget(card)
+        return view
 
     def _set_status(self, text: str) -> None:
         self.status_label.setText(f"状态：{text}")
@@ -402,7 +389,7 @@ class ChatWindow(QMainWindow):
         self.chat_scroll.verticalScrollBar().setValue(self.chat_scroll.verticalScrollBar().maximum())
 
     def _set_busy(self, busy: bool) -> None:
-        for button in [
+        buttons = [
             self.send_button,
             self.refresh_button,
             self.pause_button,
@@ -412,10 +399,12 @@ class ChatWindow(QMainWindow):
             self.clear_memory_button,
             self.search_knowledge_button,
             self.rebuild_knowledge_button,
+            self.knowledge_stats_button,
             self.search_memory_button,
             self.memory_stats_button,
             self.startup_check_button,
-        ]:
+        ]
+        for button in buttons:
             button.setDisabled(busy)
 
         self.input_edit.setDisabled(busy)
@@ -433,7 +422,6 @@ class ChatWindow(QMainWindow):
             return
 
         self.current_task_name = task_name
-
         thread = QThread(self)
         worker = Worker(fn)
 
@@ -442,15 +430,11 @@ class ChatWindow(QMainWindow):
 
         worker.moveToThread(thread)
         thread.started.connect(worker.run)
-
         worker.finished.connect(self._handle_worker_success)
-        worker.finished.connect(self._worker_finished)
         worker.error.connect(self._worker_error)
-
         worker.finished.connect(thread.quit)
         worker.error.connect(thread.quit)
         thread.finished.connect(self._thread_finished)
-
         thread.start()
 
     @Slot(object)
@@ -458,39 +442,37 @@ class ChatWindow(QMainWindow):
         task_name = self.current_task_name
 
         if task_name == "chat":
-            self._on_chat_finished(result)
+            self._on_chat_finished(dict(result))
         elif task_name == "voice":
-            self._on_voice_finished(result)
+            self._on_voice_finished(dict(result))
         elif task_name == "refresh":
-            self._on_refresh_finished(result)
+            self._on_json_result("状态已刷新。", dict(result), self.state_view)
         elif task_name == "startup_check":
-            self._on_startup_check_finished(result)
+            self._on_json_result("启动自检完成。", dict(result), self.state_view)
         elif task_name == "pause":
-            self._on_action_finished("已暂停对话。", result)
+            self._on_json_result("已暂停对话。", dict(result), self.state_view)
         elif task_name == "resume":
-            self._on_action_finished("已恢复对话。", result)
+            self._on_json_result("已恢复对话。", dict(result), self.state_view)
         elif task_name == "interrupt":
-            self._on_action_finished("已发送打断指令。", result)
+            self._on_json_result("已发送打断指令。", dict(result), self.state_view)
         elif task_name == "reset_context":
-            self._on_action_finished("上下文已重置。", result)
+            self._on_json_result("上下文已重置。", dict(result), self.state_view)
         elif task_name == "clear_memory":
-            self._on_action_finished("用户记忆已清空。", result)
+            self._on_json_result("用户记忆已清空。", dict(result), self.memory_view)
         elif task_name == "search_knowledge":
-            self._on_json_result("知识检索完成。", result)
+            self._on_json_result("知识检索完成。", dict(result), self.detail_view)
         elif task_name == "rebuild_knowledge":
-            self._on_json_result("知识索引重建完成。", result)
+            self._on_json_result("知识索引重建任务已提交。", dict(result), self.detail_view)
+        elif task_name == "knowledge_stats":
+            self._on_json_result("知识库状态已加载。", dict(result), self.detail_view)
         elif task_name == "search_memory":
-            self._on_json_result("记忆搜索完成。", result)
+            self._on_json_result("记忆搜索完成。", dict(result), self.memory_view)
         elif task_name == "memory_stats":
-            self._on_json_result("记忆统计已加载。", result)
+            self._on_json_result("记忆统计已加载。", dict(result), self.memory_view)
 
         self.current_task_name = ""
-
-    @Slot(object)
-    def _worker_finished(self, _result: object) -> None:
-        if self.current_worker is not None:
-            self.current_worker.deleteLater()
-            self.current_worker = None
+        self._set_busy(False)
+        self._set_status("就绪")
 
     @Slot(str)
     def _worker_error(self, error_text: str) -> None:
@@ -500,13 +482,14 @@ class ChatWindow(QMainWindow):
 
         self.current_task_name = ""
         self._set_busy(False)
-        self.start_record_button.setDisabled(self.recorder.is_recording)
-        self.stop_record_button.setDisabled(not self.recorder.is_recording)
         self._set_status("发生错误")
         QMessageBox.critical(self, "错误", error_text)
 
     @Slot()
     def _thread_finished(self) -> None:
+        if self.current_worker is not None:
+            self.current_worker.deleteLater()
+            self.current_worker = None
         if self.current_thread is not None:
             self.current_thread.deleteLater()
             self.current_thread = None
@@ -551,17 +534,13 @@ class ChatWindow(QMainWindow):
             QMessageBox.critical(self, "录音错误", str(exc))
             return
 
-        self.start_record_button.setDisabled(True)
-        self.stop_record_button.setDisabled(True)
         self._set_busy(True)
         self._set_status("正在识别语音并生成回复...")
-
         self._start_worker("voice", lambda: self._run_voice_pipeline(audio_path))
 
     def _run_voice_pipeline(self, audio_path: str) -> dict:
         asr_result = self.api_client.transcribe_audio(audio_path)
         transcript = str(asr_result.get("transcript", "")).strip()
-
         if not transcript:
             raise RuntimeError("ASR 没有返回文本。")
 
@@ -581,57 +560,36 @@ class ChatWindow(QMainWindow):
     def run_startup_check(self) -> None:
         self._set_status("正在执行启动自检...")
         self._set_busy(True)
-        self._start_worker(
-            "startup_check",
-            lambda: self.api_client.run_startup_check(self.user_id),
-        )
+        self._start_worker("startup_check", lambda: self.api_client.run_startup_check(self.user_id))
 
     def refresh_state(self) -> None:
         self._set_status("正在刷新状态...")
         self._set_busy(True)
-        self._start_worker(
-            "refresh",
-            lambda: self.api_client.get_runtime_snapshot(self.user_id),
-        )
+        self._start_worker("refresh", lambda: self.api_client.get_runtime_snapshot(self.user_id))
 
     def pause_dialogue(self) -> None:
-        self._set_status("正在暂停对话...")
         self._set_busy(True)
         self._start_worker("pause", self.api_client.pause_dialogue)
 
     def resume_dialogue(self) -> None:
-        self._set_status("正在恢复对话...")
         self._set_busy(True)
         self._start_worker("resume", self.api_client.resume_dialogue)
 
     def interrupt_speaking(self) -> None:
-        self._set_status("正在打断播放...")
         self._set_busy(True)
-        self._start_worker(
-            "interrupt",
-            lambda: self.api_client.interrupt_voice(reason="desktop_qt_interrupt"),
-        )
+        self._start_worker("interrupt", lambda: self.api_client.interrupt_voice(reason="desktop_qt_interrupt"))
 
     def reset_context(self) -> None:
-        self._set_status("正在重置上下文...")
         self._set_busy(True)
         self._start_worker("reset_context", self.api_client.reset_context)
 
     def clear_memory(self) -> None:
-        confirm = QMessageBox.question(
-            self,
-            "确认清空记忆",
-            f"确定要清空用户 {self.user_id} 的记忆吗？",
-        )
+        confirm = QMessageBox.question(self, "确认清空记忆", f"确定要清空用户 {self.user_id} 的记忆吗？")
         if confirm != QMessageBox.Yes:
             return
 
-        self._set_status("正在清空记忆...")
         self._set_busy(True)
-        self._start_worker(
-            "clear_memory",
-            lambda: self.api_client.clear_user_memory(self.user_id),
-        )
+        self._start_worker("clear_memory", lambda: self.api_client.clear_user_memory(self.user_id))
 
     def clear_chat(self) -> None:
         while self.chat_layout.count() > 1:
@@ -642,10 +600,9 @@ class ChatWindow(QMainWindow):
 
         self.detail_view.clear()
         self.state_view.clear()
-        self.state_graph_view.clear()
-        self.planner_graph_view.clear()
+        self.memory_view.clear()
+        self.live2d_view.clear()
         self._append_system_message("聊天窗口已清空。")
-        self._set_status("就绪")
 
     def search_knowledge(self) -> None:
         query = self.knowledge_query_edit.toPlainText().strip()
@@ -653,20 +610,16 @@ class ChatWindow(QMainWindow):
             QMessageBox.information(self, "提示", "请先输入知识检索问题。")
             return
 
-        self._set_status("正在检索知识...")
         self._set_busy(True)
-        self._start_worker(
-            "search_knowledge",
-            lambda: self.api_client.search_knowledge(query=query, top_k=4),
-        )
+        self._start_worker("search_knowledge", lambda: self.api_client.search_knowledge(query=query, top_k=4))
 
     def rebuild_knowledge(self) -> None:
-        self._set_status("正在重建知识索引...")
         self._set_busy(True)
-        self._start_worker(
-            "rebuild_knowledge",
-            lambda: self.api_client.rebuild_knowledge(force_rebuild=True),
-        )
+        self._start_worker("rebuild_knowledge", lambda: self.api_client.rebuild_knowledge(force_rebuild=True))
+
+    def load_knowledge_stats(self) -> None:
+        self._set_busy(True)
+        self._start_worker("knowledge_stats", self.api_client.get_knowledge_stats)
 
     def search_memory(self) -> None:
         query = self.memory_query_edit.toPlainText().strip()
@@ -674,7 +627,6 @@ class ChatWindow(QMainWindow):
             QMessageBox.information(self, "提示", "请先输入记忆搜索关键词。")
             return
 
-        self._set_status("正在搜索记忆...")
         self._set_busy(True)
         self._start_worker(
             "search_memory",
@@ -682,77 +634,77 @@ class ChatWindow(QMainWindow):
         )
 
     def load_memory_stats(self) -> None:
-        self._set_status("正在加载记忆统计...")
         self._set_busy(True)
-        self._start_worker(
-            "memory_stats",
-            lambda: self.api_client.get_memory_stats(self.user_id),
-        )
+        self._start_worker("memory_stats", lambda: self.api_client.get_memory_stats(self.user_id))
 
-    def _on_chat_finished(self, result: object) -> None:
-        data = dict(result)
+    def _on_chat_finished(self, data: dict) -> None:
         reply = str(data.get("reply", "")).strip()
         self._append_agent_message(reply or "后端没有返回回复。")
-        self._update_graph_debug(data)
+        self._append_memory_status(data)
+        self._update_live2d_view(data)
         self._update_detail_view(data)
-        self._set_busy(False)
-        self._set_status("就绪")
 
-    def _on_voice_finished(self, result: object) -> None:
-        data = dict(result)
+    def _on_voice_finished(self, data: dict) -> None:
         transcript = data["transcript"]
         chat_result = data["chat_result"]
 
         self._append_user_message(self.username, f"[语音识别] {transcript}")
         reply = str(chat_result.get("reply", "")).strip()
         self._append_agent_message(reply or "后端没有返回回复。")
-        self._update_graph_debug(chat_result)
+        self._append_memory_status(chat_result)
+        self._update_live2d_view(chat_result)
         self._update_detail_view(data)
 
-        self._set_busy(False)
         self.start_record_button.setDisabled(False)
         self.stop_record_button.setDisabled(True)
-        self._set_status("就绪")
 
-    def _on_startup_check_finished(self, result: object) -> None:
-        data = dict(result)
-        self.detail_view.setPlainText(self.api_client.pretty_json(data))
-        self.state_view.setPlainText(self.api_client.pretty_json(data))
-        self._append_system_message("启动自检完成。")
-        self._set_busy(False)
-        self._set_status("启动自检完成")
-
-    def _on_refresh_finished(self, result: object) -> None:
-        data = dict(result)
-        self.state_view.setPlainText(self.api_client.pretty_json(data))
-        self._set_busy(False)
-        self._set_status("状态已刷新")
-
-    def _on_action_finished(self, message: str, result: object) -> None:
-        data = dict(result)
+    def _on_json_result(self, message: str, data: dict, target: QTextEdit) -> None:
+        target.setPlainText(self.api_client.pretty_json(data))
         self._append_system_message(message)
-        self.state_view.setPlainText(self.api_client.pretty_json(data))
-        self._set_busy(False)
-        self._set_status("操作完成")
-
-    def _on_json_result(self, message: str, result: object) -> None:
-        data = dict(result)
-        self.detail_view.setPlainText(self.api_client.pretty_json(data))
-        self._append_system_message(message)
-        self._set_busy(False)
-        self._set_status("操作完成")
-
-    def _update_graph_debug(self, data: dict) -> None:
-        debug = data.get("debug", {})
-        state_result = debug.get("state_result", {})
-        planner_result = debug.get("planner_result", {})
-
-        self.state_graph_view.setPlainText(
-            self.api_client.pretty_json(state_result if isinstance(state_result, dict) else {})
-        )
-        self.planner_graph_view.setPlainText(
-            self.api_client.pretty_json(planner_result if isinstance(planner_result, dict) else {})
-        )
 
     def _update_detail_view(self, data: dict) -> None:
         self.detail_view.setPlainText(self.api_client.pretty_json(data))
+
+    def _update_live2d_view(self, data: dict) -> None:
+        live2d = data.get("live2d", {})
+        if isinstance(live2d, dict):
+            self.live2d_view.setPlainText(self.api_client.pretty_json(live2d))
+        else:
+            self.live2d_view.setPlainText(str(live2d))
+
+    def _append_memory_status(self, data: dict) -> None:
+        metadata = data.get("metadata", {})
+        if not isinstance(metadata, dict):
+            return
+
+        raw_should_store = metadata.get("memory_write_should_store")
+        if raw_should_store is None:
+            return
+
+        should_store = str(raw_should_store).lower() == "true"
+        store_status = str(metadata.get("memory_store_status", "")).strip()
+        category = str(metadata.get("memory_write_category", "") or metadata.get("category", "")).strip()
+        importance = str(metadata.get("memory_write_importance", "") or metadata.get("importance", "")).strip()
+        reason = str(metadata.get("memory_write_reason", "") or metadata.get("policy_reason", "")).strip()
+        hint = str(metadata.get("memory_hint", "")).strip()
+
+        lines = []
+        if should_store and store_status == "stored":
+            lines.append("长期记忆：已写入")
+        elif should_store:
+            lines.append("长期记忆：已判断应写入，但未看到 stored 状态")
+        else:
+            lines.append("长期记忆：未写入")
+
+        if category:
+            lines.append(f"类型：{category}")
+        if importance:
+            lines.append(f"重要性：{importance}")
+        if reason:
+            lines.append(f"原因：{reason}")
+        if hint:
+            lines.append(f"内容：{hint}")
+
+        text = "\n".join(lines)
+        self.memory_view.setPlainText(text)
+        self._append_system_message(text)

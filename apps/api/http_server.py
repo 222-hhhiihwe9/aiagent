@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from apps.api.routes.audio import router as audio_router
 from apps.api.routes.chat import router as chat_router
@@ -11,10 +12,25 @@ from apps.api.routes.health import router as health_router
 from apps.api.routes.knowledge import router as knowledge_router
 from apps.api.routes.memory import router as memory_router
 from apps.api.routes.voice import router as voice_router
+from config.settings import settings
 
 logger = logging.getLogger("aiagent.api")
 
-app = FastAPI(title="aiagent api")
+app = FastAPI(title="aiagent api", version="1.0.0")
+
+cors_origins = [
+    item.strip()
+    for item in settings.api_cors_origins.split(",")
+    if item.strip()
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=cors_origins or ["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 app.include_router(health_router)
 app.include_router(chat_router)
@@ -28,3 +44,12 @@ app.include_router(audio_router)
 @app.on_event("startup")
 async def on_startup() -> None:
     logger.info("API server started.")
+
+
+@app.get("/")
+def root():
+    return {
+        "ok": True,
+        "service": "aiagent api",
+        "version": "1.0.0",
+    }

@@ -2,9 +2,9 @@
 
 from aiagent.brain.agent_core import AgentCore
 from aiagent.brain.dialogue_manager import DialogueManager
+from aiagent.graphs.memory_graph import MemoryRunner
 from aiagent.knowledge.rag_pipeline import RAGPipeline
-from aiagent.memory.long_term_memory import LongTermMemory
-from aiagent.memory.user_profile_memory import UserProfileMemory
+from aiagent.memory.mem0_memory import Mem0LongTermMemory
 from aiagent.orchestrator.dispatcher import EventDispatcher
 from aiagent.orchestrator.interrupt_manager import InterruptManager
 from aiagent.perception.asr_listener import ASRListener
@@ -27,8 +27,8 @@ class CoreRuntime:
         speaking_state: SpeakingState,
         asr_listener: ASRListener,
         stream_state: StreamingState,
-        long_term_memory: LongTermMemory,
-        user_profile_memory: UserProfileMemory,
+        long_term_memory: Mem0LongTermMemory,
+        memory_runner: MemoryRunner,
         source_router: SourceRouter,
         llm_service: LLMService,
         conversation_state: ConversationState,
@@ -44,7 +44,7 @@ class CoreRuntime:
         self.asr_listener = asr_listener
         self.stream_state = stream_state
         self.long_term_memory = long_term_memory
-        self.user_profile_memory = user_profile_memory
+        self.memory_runner = memory_runner
         self.source_router = source_router
         self.llm_service = llm_service
         self.conversation_state = conversation_state
@@ -62,35 +62,14 @@ class CoreRuntime:
         return self.handle_input_event(event)
 
     def handle_chat(self, text: str, user_id: str = "guest", username: str = "guest") -> str:
-        event = InputEvent(
-            source=InputSource.CHAT,
-            text=text,
-            user_id=user_id,
-            user_name=username,
-        )
-        output = self.handle_input_event(event)
-        return output.packet.reply_text
+        event = InputEvent(source=InputSource.CHAT, text=text, user_id=user_id, user_name=username)
+        return self.handle_input_event(event).packet.reply_text
 
-    def handle_chat_full(
-        self,
-        text: str,
-        user_id: str = "guest",
-        username: str = "guest",
-    ) -> OutputEvent:
-        event = InputEvent(
-            source=InputSource.CHAT,
-            user_id=user_id,
-            user_name=username,
-            text=text,
-        )
+    def handle_chat_full(self, text: str, user_id: str = "guest", username: str = "guest") -> OutputEvent:
+        event = InputEvent(source=InputSource.CHAT, user_id=user_id, user_name=username, text=text)
         return self.handle_input_event(event)
 
-    def handle_asr_text(
-        self,
-        audio_text: str,
-        user_id: str = "mic",
-        username: str = "麦克风输入",
-    ) -> OutputEvent:
+    def handle_asr_text(self, audio_text: str, user_id: str = "mic", username: str = "麦克风输入") -> OutputEvent:
         event = InputEvent(
             source=InputSource.ASR,
             text=audio_text,
@@ -100,14 +79,8 @@ class CoreRuntime:
         )
         return self.handle_input_event(event)
 
-    def handle_voice_once(
-        self,
-        user_id: str = "mic",
-        username: str = "麦克风输入",
-        record_seconds: int = 5,
-    ) -> OutputEvent:
+    def handle_voice_once(self, user_id: str = "mic", username: str = "麦克风输入", record_seconds: int = 5) -> OutputEvent:
         transcript = self.asr_listener.listen_once(record_seconds=record_seconds)
-
         event = InputEvent(
             source=InputSource.ASR,
             text=transcript,
@@ -148,12 +121,9 @@ class CoreRuntime:
 
         if self.voice_session_controller is None:
             raise RuntimeError("Voice session controller is not configured.")
-
+        
         self.voice_session_controller.interrupt_listening(reason=reason)
-        return {
-            "status": "interrupted",
-            "reason": reason,
-        }
+        return {"status": "interrupted", "reason": reason}
 
     def transcribe_audio_file(self, audio_path: str) -> str:
         return self.asr_listener.transcribe_file(audio_path)
@@ -163,6 +133,12 @@ class CoreRuntime:
 
     def rebuild_knowledge_index(self, force_rebuild: bool = True) -> dict:
         return self.rag_pipeline.build_index(force_rebuild=force_rebuild)
+    
+    def rebuild_knowledge_index_async(self,force_rebuild:bool=True) ->dict:
+        return self.rag_pipeline.rebuild_async(force_rebuild=force_rebuild)
+    
+    def get_knowledge_rebuild_status(self) ->dict:
+        return self.rag_pipeline.build_status()
 
     def search_knowledge(self, query: str, top_k: int = 4) -> list[dict]:
         return self.rag_pipeline.debug_retrieve(query=query, top_k=top_k)
@@ -181,32 +157,40 @@ class CoreRuntime:
         return self.stream_state
 
     def get_user_profile_memories(self, user_id: str) -> list[dict]:
-        return [item.model_dump(mode="json") for item in self.user_profile_memory.all_for_user(user_id)]
+        return []
 
-    def get_long_term_memories(self, user_id: str, limit: int = 10) -> list[dict]:
-        items = self.long_term_memory.recall_for_user(user_id=user_id, limit=limit)
-        return [item.model_dump(mode="json") for item in items]
+    def get_long_term_memories(self, user_id: str, limit: int = 20) -> list[dict]:
+        return self.long_term_memory.get_all(user_id=user_id, limit=limit)
 
     def search_memories(self, user_id: str, query: str, limit: int = 10) -> dict:
-        profile = self.user_profile_memory.search_for_user(user_id=user_id, query=query, limit=limit)
-        long_term = self.long_term_memory.search_for_user(user_id=user_id, query=query, limit=limit)
-
+        hits = self.long_term_memory.search(user_id=user_id, query=query, limit=limit)
         return {
             "query": query,
-            "profile_memories": [item.model_dump(mode="json") for item in profile],
-            "long_term_memories": [item.model_dump(mode="json") for item in long_term],
+            "profile_memories": [],
+            "long_term_memories": [
+                {
+                    "id": hit.id,
+                    "memory": hit.memory,
+                    "score": hit.score,
+                    "metadata": hit.metadata,
+                    "relations": hit.relations,
+                    "created_at": hit.created_at,
+                    "updated_at": hit.updated_at,
+                }
+                for hit in hits
+            ],
         }
 
     def get_memory_stats(self, user_id: str) -> dict:
+        memories = self.long_term_memory.get_all(user_id=user_id, limit=1000)
         return {
             "user_id": user_id,
-            "profile": self.user_profile_memory.stats_for_user(user_id),
-            "long_term": self.long_term_memory.stats_for_user(user_id),
+            "profile": {"count": 0},
+            "long_term": {"count": len(memories)},
         }
 
     def clear_user_memories(self, user_id: str) -> dict[str, str]:
-        self.user_profile_memory.clear_user(user_id)
-        self.long_term_memory.clear_user(user_id)
+        self.long_term_memory.delete_all(user_id=user_id)
         self.agent_core.main_runner.clear_thread(user_id)
         return {"status": "cleared", "user_id": user_id}
 

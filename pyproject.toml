@@ -4,7 +4,12 @@ version = "0.1.0"
 description = "Unified AI VTuber runtime"
 requires-python = ">=3.11"
 dependencies = [
+    "dotenv>=0.9.9",
+    "langchain>=1.2.15",
     "langchain-openai>=0.2.14",
+    "langgraph>=1.1.10",
+    "mem0ai>=2.0.1",
+    "ollama>=0.6.1",
     "pyyaml>=6.0.3",
 ]
 

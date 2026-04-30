@@ -2,6 +2,7 @@
 
 from datetime import datetime
 from enum import StrEnum
+from typing import Any
 from uuid import uuid4
 
 from pydantic import BaseModel, Field
@@ -32,6 +33,7 @@ class ResponsePacket(BaseModel):
     audio_segment_texts: list[str] = Field(default_factory=list)
 
     live2d_command_path: str | None = None
+    live2d:dict[str,Any] =Field(default_factory=dict)
 
     metadata: dict[str, str] = Field(default_factory=dict)
 

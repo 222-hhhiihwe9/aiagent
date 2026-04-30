@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import json
+import threading
 from pathlib import Path
 from typing import Any
+from datetime import datetime
+
 
 from langchain_core.documents import Document
 
@@ -39,29 +42,113 @@ class RAGPipeline:
         self.final_top_k = final_top_k
         self.documents: list[Document] = []
 
+        self._build_lock = threading.RLock()
+        self._build_status:dict[str,Any] = {
+            "running":False,
+            "status":"idle",
+            "started_at":None,
+            "finished_at":None,
+            "error":"",
+            "stats":{},
+        }
+
     def build_index(self, force_rebuild: bool = False) -> dict[str, Any]:
+        with self._build_lock:
+            self._build_status.update(
+                {
+                    "running":True,
+                    "status":"running",
+                    "started_at":datetime.now().isoformat(timespec="seconds"),
+                    "finished_at":None,
+                    "error":"",
+                }
+            )
+        
+        try:
+            stats = self._build_index_inner(force_rebuild=force_rebuild)
+        except Exception as exc:
+            with self._build_lock:
+                self._build_status.update(
+                    {
+                        "running":False,
+                        "status":"failed",
+                        "finished_at":datetime.now().isoformat(timespec="seconds"),
+                        "error":str(exc),
+                    }
+                )
+            raise 
+
+        with self._build_lock:
+            self._build_status.update(
+                {
+                    "running":False,
+                    "status":"done",
+                    "finished_at":datetime.now().isoformat(timespec="seconds"),
+                    "stats":stats,
+                }
+            )
+        return stats
+
+    def rebuild_async(self,force_rebuild:bool = True) -> dict[str,Any]:
+        with self._build_lock:
+            if self._build_status.get("running"):
+                return self.build_status()
+            
+            self._build_status.update(
+                {
+                    "running":True,
+                    "status":"queued",
+                    "started_at":datetime.now().isoformat(timespec="seconds"),
+                    "finished_at":None,
+                    "error":"",
+                }
+            )
+
+        thread = threading.Thread(
+            target=self._rebuild_worker,
+            kwargs={"force_rebuild":force_rebuild},
+            daemon=True
+        )
+        thread.start()
+
+        return self.build_status()
+    
+    def build_status(self) -> dict[str,Any]:
+        with self._build_lock:
+            return dict(self._build_status)
+        
+    def _rebuild_worker(self,force_rebuild:bool) ->None:
+        try:
+            self.build_index(force_rebuild=force_rebuild)
+
+        except Exception:
+            pass
+    
+    def _build_index_inner(self,force_rebuild:bool = False) ->dict[str,Any]:
         if not force_rebuild and self.docs_index_path.exists() and self.faiss_dir.exists():
             self._load_documents()
             self.vector_store.load(self.faiss_dir)
             self.retriever.build(self.documents)
             return self.stats()
-
+        
         raw_docs = self.loader.load_directory(self.knowledge_dir)
         split_docs = self.loader.split_documents(
             raw_docs,
             chunk_size=self.chunk_size,
-            chunk_overlap=self.chunk_overlap,
+            chunk_overlap=self.chunk_overlap
         )
 
         if not split_docs:
             raise RuntimeError(f"No knowledge documents were loaded from {self.knowledge_dir}")
-
+     
         self.documents = split_docs
         self._save_documents(split_docs)
         self.vector_store.build(split_docs)
         self.vector_store.save(self.faiss_dir)
         self.retriever.build(split_docs)
+
         return self.stats()
+
 
     def ensure_ready(self) -> None:
         if self.documents:
@@ -77,7 +164,9 @@ class RAGPipeline:
 
     def retrieve(self, query: str, top_k: int | None = None) -> list[RetrievedChunk]:
         self.ensure_ready()
+
         final_top_k = top_k or self.final_top_k
+
         coarse = self.retriever.retrieve(
             query=query,
             vector_store=self.vector_store,
@@ -94,7 +183,7 @@ class RAGPipeline:
     def format_for_prompt(self, query: str, top_k: int = 4) -> str:
         chunks = self.search(query=query, top_k=top_k)
         if not chunks:
-            return "无"
+            return "无相关知识"
         return "\n\n".join(chunks)
 
     def debug_retrieve(self, query: str, top_k: int | None = None) -> list[dict[str, Any]]:
@@ -124,6 +213,7 @@ class RAGPipeline:
             "chunk_size": self.chunk_size,
             "chunk_overlap": self.chunk_overlap,
             "final_top_k": self.final_top_k,
+            "build_status":self.build_status()
         }
 
     def _format_chunk(self, chunk: RetrievedChunk, index: int) -> str:
@@ -144,7 +234,9 @@ class RAGPipeline:
 
     def _save_documents(self, documents: list[Document]) -> None:
         self.docs_index_path.parent.mkdir(parents=True, exist_ok=True)
+
         payload = [{"page_content": doc.page_content, "metadata": doc.metadata} for doc in documents]
+        
         self.docs_index_path.write_text(
             json.dumps(payload, ensure_ascii=False, indent=2),
             encoding="utf-8",

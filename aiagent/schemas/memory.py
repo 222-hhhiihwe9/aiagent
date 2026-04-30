@@ -1,29 +1,31 @@
-"""Memory schema definitions."""
+from __future__ import annotations
 
-from datetime import datetime
 from enum import StrEnum
-from uuid import uuid4
+from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel,Field
 
+class MemoryCategory(StrEnum):
+    IDENTITY  = 'identity'
+    PREFERENCE = "preference"
+    RELATIONSHIP = "relationship"
+    GOAL = "goal"
+    HABIT = "habit"
+    BOUNDARY = "boundary"
+    EVENT = "event"
+    OTHER = "other"
 
-class MemoryKind(StrEnum):
-    SHORT_TERM = "short_term"
-    USER_PORFILE = "user_profile"
-    LONG_TERM = "long_term"
-    SUMMARY = "summary"
+class MemoryImportance(StrEnum):
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
 
+class MemoryWriteDecision(BaseModel):
+    should_store : bool =False
+    category : MemoryCategory = MemoryCategory.OTHER
+    importance : MemoryImportance = MemoryImportance.MEDIUM
+    reason:str =""
+    memory_hint : str =""
+    metadata:dict[str,Any] = Field(default_factory=dict)
 
-class MemoryItem(BaseModel):
-    memory_id: str = Field(default_factory=lambda: str(uuid4()))
-    user_id: str
-    username: str
-    content: str
-    kind: MemoryKind
-    timestamp: datetime = Field(default_factory=datetime.now)
-    importance: float = 0.5
-
-    tags: list[str] = Field(default_factory=list)
-    summary: str = ""
-    source_text: str = ""
-    confidence: float = 0.7
+    

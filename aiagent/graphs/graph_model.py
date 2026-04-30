@@ -4,6 +4,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+NO_LONG_TERM_MEMORY_TEXT = "无长期记忆。"
 
 class StateGraphInput(BaseModel):
     user_text: str
@@ -142,7 +143,7 @@ class LLMGraphInput(BaseModel):
     planner_confidence: float = 0.0
 
     retrieved_context: list[str] = Field(default_factory=list)
-
+    long_term_memory_context: str = NO_LONG_TERM_MEMORY_TEXT
 
 class LLMGraphResult(BaseModel):
     thread_id: str
@@ -164,4 +165,6 @@ class LLMGraphResult(BaseModel):
 
     retrieved_context: list[str] = Field(default_factory=list)
     short_term_messages: list[str] = Field(default_factory=list)
+    long_term_memory_context: str = NO_LONG_TERM_MEMORY_TEXT
+    
     metadata: dict[str, str] = Field(default_factory=dict)
