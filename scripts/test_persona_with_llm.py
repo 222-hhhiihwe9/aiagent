@@ -7,7 +7,7 @@ from config.settings import settings
 
 
 def main() -> None:
-    loader = PersonaLoader(base_dir="data/characters")
+    loader = PersonaLoader(base_dir="data/persona")
     persona_config = loader.load_persona("yzl")
     persona = PersonaRuntime(persona_config)
 

@@ -3,7 +3,9 @@
 from aiagent.brain.agent_core import AgentCore
 from aiagent.brain.dialogue_manager import DialogueManager
 from aiagent.graphs.memory_graph import MemoryRunner
+from aiagent.graphs.vision_graph import VisionRunner
 from aiagent.knowledge.rag_pipeline import RAGPipeline
+from aiagent.graphs.graph_model import VisionAnalyzeResult
 from aiagent.memory.mem0_memory import Mem0LongTermMemory
 from aiagent.orchestrator.dispatcher import EventDispatcher
 from aiagent.orchestrator.interrupt_manager import InterruptManager
@@ -14,6 +16,7 @@ from aiagent.perception.voice_turn_manager import VoiceTurnManager
 from aiagent.schemas.inputs import InputEvent, InputSource
 from aiagent.schemas.outputs import OutputEvent
 from aiagent.services.llm_service import LLMService
+from aiagent.services.vision_service import VisionService
 from aiagent.state.conversation_state import ConversationState
 from aiagent.state.speaking_state import SpeakingState
 from aiagent.state.stream_state import StreamingState
@@ -37,6 +40,8 @@ class CoreRuntime:
         rag_pipeline: RAGPipeline,
         voice_turn_manager: VoiceTurnManager | None = None,
         voice_session_controller: VoiceSessionController | None = None,
+        vision_service: VisionService | None = None,
+        vision_runner: VisionRunner | None = None,
     ) -> None:
         self.dispatcher = dispatcher
         self.agent_core = agent_core
@@ -53,6 +58,8 @@ class CoreRuntime:
         self.rag_pipeline = rag_pipeline
         self.voice_turn_manager = voice_turn_manager
         self.voice_session_controller = voice_session_controller
+        self.vision_service = vision_service
+        self.vision_runner = vision_runner
 
     def handle_input_event(self, event: InputEvent) -> OutputEvent:
         return self.dispatcher.handle_input(event)
@@ -214,3 +221,144 @@ class CoreRuntime:
             "speaking_state": self.speaking_state.model_dump(),
             "stream_state": self.stream_state.model_dump(),
         }
+    
+    def analyze_image_upload(
+        self,
+        file_obj,
+        filename: str,
+        user_prompt: str = "",
+        user_id: str = "guest",
+    ) -> VisionAnalyzeResult:
+        if self.vision_service is None:
+            raise RuntimeError("Vision service is not configured.")
+
+        return self.vision_service.analyze_upload(
+            file_obj=file_obj,
+            filename=filename,
+            user_prompt=user_prompt,
+            user_id=user_id,
+        )
+
+    def analyze_image_path(
+        self,
+        image_path: str,
+        user_prompt: str = "",
+        user_id: str = "guest",
+    ) -> VisionAnalyzeResult:
+        if self.vision_service is None:
+            raise RuntimeError("Vision service is not configured.")
+
+        return self.vision_service.analyze_local_path(
+            image_path=image_path,
+            user_prompt=user_prompt,
+            user_id=user_id,
+        )
+
+    def handle_vision_chat_upload(
+        self,
+        file_obj,
+        filename: str,
+        user_prompt: str,
+        user_id: str = "guest",
+        username: str = "guest",
+    ) -> dict:
+        if self.vision_runner is None:
+            raise RuntimeError("Vision runner is not configured.")
+
+        vision_state = self.vision_runner.analyze_upload(
+            file_obj=file_obj,
+            filename=filename,
+            user_prompt=user_prompt,
+            user_id=user_id,
+        )
+
+        chat_text = self._build_vision_chat_text(
+            user_prompt=user_prompt,
+            vision_chat_context=vision_state.get("chat_context", ""),
+            memory_hint=vision_state.get("memory_hint", ""),
+        )
+
+        chat_output = self.handle_chat_full(
+            text=chat_text,
+            user_id=user_id,
+            username=username,
+        )
+
+        packet = chat_output.packet
+
+        vision_metadata = vision_state.get("metadata", {})
+        merged_metadata = dict(packet.metadata)
+        for key, value in vision_metadata.items():
+            merged_metadata[str(key)] = str(value)
+
+        packet.metadata = merged_metadata
+
+        live2d_suggestion = vision_state.get("live2d_suggestion", {})
+        if isinstance(live2d_suggestion, dict) and live2d_suggestion:
+            packet.live2d = self._merge_vision_live2d(
+                original=packet.live2d,
+                suggestion=live2d_suggestion,
+            )
+
+        return {
+            "vision_state": vision_state,
+            "chat_output": chat_output,
+        }
+
+    def rebuild_vision_character_index(self, force_rebuild: bool = True) -> dict:
+        if self.vision_service is None:
+            raise RuntimeError("Vision service is not configured.")
+
+        return self.vision_service.rebuild_character_index(
+            force_rebuild=force_rebuild,
+        )
+
+    def get_vision_character_index_stats(self) -> dict:
+        if self.vision_service is None:
+            raise RuntimeError("Vision service is not configured.")
+
+        return self.vision_service.character_index_stats()
+
+    def _build_vision_chat_text(
+        self,
+        user_prompt: str,
+        vision_chat_context: str,
+        memory_hint: str = "",
+    ) -> str:
+        parts = [
+            user_prompt.strip() or "请看这张图片。",
+            "",
+            vision_chat_context.strip(),
+        ]
+
+        if memory_hint.strip():
+            parts.extend(
+                [
+                    "",
+                    "[视觉记忆候选]",
+                    memory_hint.strip(),
+                    "是否写入长期记忆仍然需要由 memory_graph 根据用户表达和长期价值判断。",
+                ]
+            )
+
+        return "\n".join(part for part in parts if part is not None)
+
+    def _merge_vision_live2d(self, original: dict, suggestion: dict) -> dict:
+        live2d = dict(original or {})
+
+        character = dict(live2d.get("character") or {})
+        scene = dict(live2d.get("scene") or {})
+
+        if suggestion.get("suggested_emotion"):
+            character["emotion"] = suggestion["suggested_emotion"]
+        if suggestion.get("suggested_expression"):
+            character["expression"] = suggestion["suggested_expression"]
+        if suggestion.get("suggested_motion"):
+            character["motion"] = suggestion["suggested_motion"]
+        if suggestion.get("suggested_background"):
+            scene["background_id"] = suggestion["suggested_background"]
+
+        live2d["character"] = character
+        live2d["scene"] = scene
+
+        return live2d

@@ -11,6 +11,7 @@ from apps.api.routes.control import router as control_router
 from apps.api.routes.health import router as health_router
 from apps.api.routes.knowledge import router as knowledge_router
 from apps.api.routes.memory import router as memory_router
+from apps.api.routes.vision import router as vision_router
 from apps.api.routes.voice import router as voice_router
 from config.settings import settings
 
@@ -37,6 +38,7 @@ app.include_router(chat_router)
 app.include_router(control_router)
 app.include_router(memory_router)
 app.include_router(knowledge_router)
+app.include_router(vision_router)
 app.include_router(voice_router)
 app.include_router(audio_router)
 

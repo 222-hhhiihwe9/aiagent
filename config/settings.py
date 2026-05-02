@@ -109,6 +109,47 @@ class Settings(BaseSettings):
     rag_vector_top_k: int = Field(default=6, alias="RAG_VECTOR_TOP_K")
     rag_final_top_k: int = Field(default=4, alias="RAG_FINAL_TOP_K")
 
+    vision_provider: str = Field(default="mock", alias="VISION_PROVIDER")
+    vision_model: str = Field(default="", alias="VISION_MODEL")
+    vision_api_key_env: str | None = Field(default=None, alias="VISION_API_KEY_ENV")
+    vision_base_url: str = Field(default="", alias="VISION_BASE_URL")
+    vision_timeout_seconds: float = Field(default=60.0, alias="VISION_TIMEOUT_SECONDS")
+
+    vision_upload_dir: str = Field(default="data/uploads/images", alias="VISION_UPLOAD_DIR")
+    vision_max_image_bytes: int = Field(default=12582912, alias="VISION_MAX_IMAGE_BYTES")
+
+    vision_character_root_dir: str = Field(
+        default="data/vision/characters",
+        alias="VISION_CHARACTER_ROOT_DIR",
+    )
+    vision_character_index_dir: str = Field(
+        default="data/cache/vision/character_index",
+        alias="VISION_CHARACTER_INDEX_DIR",
+    )
+    vision_character_embedding_model_name: str = Field(
+        default="clip-ViT-B-32",
+        alias="VISION_CHARACTER_EMBEDDING_MODEL_NAME",
+    )
+    vision_character_embedding_model_path: str = Field(
+        default="",
+        alias="VISION_CHARACTER_EMBEDDING_MODEL_PATH",
+    )
+    vision_character_embedding_device: str = Field(
+        default="cpu",
+        alias="VISION_CHARACTER_EMBEDDING_DEVICE",
+    )
+    vision_character_embedding_local_files_only: bool = Field(
+        default=False,
+        alias="VISION_CHARACTER_EMBEDDING_LOCAL_FILES_ONLY",
+    )
+    vision_character_confident_score: float = Field(
+        default=0.78,
+        alias="VISION_CHARACTER_CONFIDENT_SCORE",
+    )
+
+
+
+
     memory_llm_provider: str = Field(default="openai", alias="MEMORY_LLM_PROVIDER")
     memory_llm_model: str = Field(default="gpt-4o-mini", alias="MEMORY_LLM_MODEL")
     memory_llm_api_key_env: str = Field(default="OPENAI_API_KEY", alias="MEMORY_LLM_API_KEY_ENV")

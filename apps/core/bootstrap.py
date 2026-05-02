@@ -16,11 +16,15 @@ from aiagent.graphs.memory_graph import MemoryRunner
 from aiagent.graphs.planner_graph import PlannerRunner
 from aiagent.graphs.rag_graph import RAGRunner
 from aiagent.graphs.state_graph import StateRunner
+from aiagent.graphs.vision_graph import VisionRunner
 from aiagent.knowledge.document_loader import DocumentLoader
 from aiagent.knowledge.rag_pipeline import RAGPipeline
 from aiagent.knowledge.reranker import SimpleReranker
 from aiagent.knowledge.retriever import HybridRetriever
 from aiagent.knowledge.vector_store import LangChainVectorStore
+from aiagent.vision.character_registry import CharacterRegistry
+from aiagent.vision.character_retriever import CharacterRetriever
+from aiagent.vision.image_store import ImageStore
 from aiagent.memory.mem0_memory import Mem0LongTermMemory
 from aiagent.orchestrator.dispatcher import EventDispatcher
 from aiagent.orchestrator.event_bus import EventBus
@@ -35,6 +39,7 @@ from aiagent.perception.voice_turn_manager import VoiceTurnManager
 from aiagent.persona.persona_loader import PersonaLoader
 from aiagent.persona.persona_manager import PersonaManager
 from aiagent.services.llm_service import LLMService
+from aiagent.services.vision_service import VisionService
 from aiagent.services.memory_policy_llm_service import MemoryPolicyLLMService
 from aiagent.services.planner_llm_service import PlannerLLMService
 from aiagent.services.state_llm_service import StateLLMService
@@ -127,6 +132,41 @@ def build_runtime() -> CoreRuntime:
         min_cosine_score=0.42,
         require_relevance=True,
     )
+    vision_api_key = _resolve_env_secret(settings.vision_api_key_env)
+
+    vision_service = VisionService(
+        image_store=ImageStore(
+            upload_dir=settings.vision_upload_dir,
+            max_bytes=settings.vision_max_image_bytes,
+        ),
+        character_retriever=CharacterRetriever(
+            registry=CharacterRegistry(
+                root_dir=settings.vision_character_root_dir,
+            ),
+            embedding_model_name=settings.vision_character_embedding_model_name,
+            embedding_model_path=settings.vision_character_embedding_model_path,
+            device=settings.vision_character_embedding_device,
+            local_files_only=settings.vision_character_embedding_local_files_only,
+            cache_dir=settings.vision_character_index_dir,
+            confident_score=settings.vision_character_confident_score,
+        ),
+        provider=settings.vision_provider,
+        model=settings.vision_model,
+        api_key=vision_api_key,
+        base_url=(
+            settings.vision_base_url
+            or (
+                settings.siliconflow_base_url
+                if settings.vision_provider.strip().lower() == "siliconflow"
+                else settings.openai_base_url
+                if settings.vision_provider.strip().lower() == "openai"
+                else ""
+            )
+        ),
+        timeout_seconds=settings.vision_timeout_seconds,
+        confident_score=settings.vision_character_confident_score,
+    )
+    vision_runnner = VisionRunner(vision_service=vision_service)
 
     state_llm_service = StateLLMService(settings=settings)
     state_runner = StateRunner(
@@ -298,4 +338,6 @@ def build_runtime() -> CoreRuntime:
         rag_pipeline=rag_pipeline,
         voice_turn_manager=voice_turn_manager,
         voice_session_controller=voice_session_controller,
+        vision_service=vision_service,
+        vision_runner=vision_runnner,
     )

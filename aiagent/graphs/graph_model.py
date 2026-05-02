@@ -114,6 +114,56 @@ class RAGGraphResult(BaseModel):
     reason: str = ""
     metadata: dict[str, str] = Field(default_factory=dict)
 
+class VisionSafetyResult(BaseModel):
+    has_sentitive_content: bool = False
+    risk_level: str =  "none"
+    reason:str = ""
+
+class VisionMemoryCandidate(BaseModel):
+    should_consider: bool = False
+    reason: str = ""
+
+class VisionLive2DSuggestion(BaseModel):
+    suggested_emotion : str = "neutral"
+    suggested_expression : str ="neutral"
+    suggested_motion : str = "idle"
+    suggested_background : str = "room_default"
+
+class CharacterCandidate(BaseModel):
+    character_id : str
+    name:str
+    aliases:list[str] = Field(default_factory=list)
+    confidence:float = 0.0
+    score:float = 0.0
+    evidence:list[str] = Field(default_factory=list)
+    metadata: dict[str,Any] = Field(default_factory=dict)
+
+class VisionAnalyzeResult(BaseModel):
+    image_id:str
+    image_path:str
+    image_url :str = ""
+    width:int = 0
+    height:int = 0
+    format:str = ""
+
+    summary:str = ""
+    objects : list[str] = Field(default_factory=list)
+    scene:str = ""
+    ocr_text : list[str] = Field(default_factory=list)
+    mood:str = ""
+
+    recognized_characters :list[CharacterCandidate] = Field(default_factory=list)
+    is_confident:bool = False
+    confidence:float = 0.0
+
+    safety:VisionSafetyResult = Field(default_factory=VisionSafetyResult)
+    memory:VisionMemoryCandidate = Field(default_factory=VisionMemoryCandidate)
+    live2d:VisionLive2DSuggestion = Field(default_factory=VisionLive2DSuggestion)
+
+    raw_model_output : str =""
+    metadata:dict[str,Any] = Field(default_factory=dict)
+
+    
 
 class LLMGraphInput(BaseModel):
     thread_id: str

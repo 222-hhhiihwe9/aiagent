@@ -8,6 +8,7 @@ dist/
 build/
 data/cache/
 data/logs/
+data/
 
 # Large model files
 data/models/

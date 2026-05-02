@@ -9,7 +9,7 @@ import yaml
 from aiagent.persona.persona_models import PersonaConfig
 
 class PersonaLoader:
-    def __init__(self, base_dir: str | Path = "data/characters") -> None:
+    def __init__(self, base_dir: str | Path = "data/persona") -> None:
         self.base_dir = Path(base_dir)
 
     def load_from_file(self, file_path: str | Path) -> PersonaConfig:
