@@ -13,6 +13,8 @@ from aiagent.live2d.scene_mapper import Live2DSceneMapper
 
 
 class Live2DPayloadBuilder:
+    """把语义层回复状态转换成客户端 Live2D 指令 payload。"""
+
     def __init__(
         self,
         registry: Live2DRegistry,
@@ -37,6 +39,11 @@ class Live2DPayloadBuilder:
         audio_url: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        """解析角色资源、场景、口型模式和元数据。
+
+        调用方只传入 emotion、motion、background 等高层提示；builder 通过
+        profile 映射成稳定的文件级指令，供 API、Qt 和 Flutter 共用。
+        """
         character_profile = self.registry.get_character(character_id)
 
         expression_asset = self.motion_mapper.resolve_expression(

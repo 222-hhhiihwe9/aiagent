@@ -1,13 +1,19 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
 from fastapi import APIRouter
 from pydantic import BaseModel
+from starlette.responses import JSONResponse
 
+from cloud.config import cloud_settings
+from cloud.degrade import degraded_chat_response
+from cloud.timeouts import CloudTimeoutError, to_thread_with_timeout
 from apps.api.response_utils import error_response, ok_response
 from apps.core.runtime_registry import get_runtime, get_runtime_error
+from config.settings import settings
 
 router = APIRouter()
 logger = logging.getLogger("aiagent.api.chat")
@@ -20,7 +26,7 @@ class ChatRequest(BaseModel):
 
 
 @router.post("/chat")
-def chat(req: ChatRequest):
+async def chat(req: ChatRequest):
     try:
         runtime = get_runtime()
     except Exception as exc:
@@ -33,11 +39,23 @@ def chat(req: ChatRequest):
         )
 
     try:
-        output = runtime.handle_chat_full(
-            text=req.text,
-            user_id=req.user_id,
-            username=req.username,
-        )
+        if cloud_settings.cloud_mode:
+            output = await to_thread_with_timeout(
+                "chat_handler",
+                max(10.0, settings.llm_timeout_seconds + settings.tts_timeout_seconds + 10.0),
+                runtime.handle_chat_full,
+                text=req.text,
+                user_id=req.user_id,
+                username=req.username,
+            )
+        else:
+            output = await asyncio.to_thread(
+                runtime.handle_chat_full,
+                text=req.text,
+                user_id=req.user_id,
+                username=req.username,
+            )
+
         packet = output.packet
         live2d = packet.live2d or _build_live2d_payload(packet)
 
@@ -58,8 +76,32 @@ def chat(req: ChatRequest):
             metadata=packet.metadata,
         )
 
+    except CloudTimeoutError as exc:
+        logger.warning("/chat timed out: %s", exc)
+        return JSONResponse(
+            status_code=504,
+            content=degraded_chat_response(
+                stage=exc.stage,
+                error=str(exc),
+                user_text=req.text,
+                retry_after_seconds=5,
+            ),
+        )
+
     except Exception as exc:
         logger.exception("Chat route failed: %s", exc)
+
+        if cloud_settings.cloud_mode:
+            return JSONResponse(
+                status_code=503,
+                content=degraded_chat_response(
+                    stage="chat_handler",
+                    error=str(exc),
+                    user_text=req.text,
+                    retry_after_seconds=5,
+                ),
+            )
+
         return error_response(stage="chat_handler", exc=exc, status_code=500)
 
 

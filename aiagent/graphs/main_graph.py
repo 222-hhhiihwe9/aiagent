@@ -19,6 +19,8 @@ NO_LONG_TERM_MEMORY_TEXT = "无长期记忆。"
 
 
 class MainGraphState(TypedDict, total=False):
+    """单轮对话中各 LangGraph 节点共享的状态。"""
+
     input_event: InputEvent
     persona_runtime: PersonaRuntime
     session_id: str
@@ -45,6 +47,13 @@ class MainGraphState(TypedDict, total=False):
 
 
 class MainRunner:
+    """编排完整的一轮回复流程。
+
+    Vision 为图片轮次补充上下文，Memory 检索长期记忆，State/Planner 决定
+    回复策略，RAG 在需要时注入知识，LLM 生成回复，随后按策略写入记忆，
+    最后组装 ResponsePacket。
+    """
+
     def __init__(
         self,
         state_runner: StateRunner,
@@ -65,6 +74,8 @@ class MainRunner:
     def _build_graph(self):
         graph = StateGraph(MainGraphState)
 
+        # 目前图是线性的。每个关注点独立成节点，方便查看 metadata，
+        # 也方便后续改成条件分支。
         graph.add_node("prepare_context", self._prepare_context_node)
         graph.add_node("run_vision_graph", self._run_vision_graph_node)
         graph.add_node("retrieve_memory", self._retrieve_memory_node)
@@ -143,6 +154,8 @@ class MainRunner:
         event = state["input_event"]# type: ignore
         metadata = dict(state.get("metadata", {}))
 
+        # 纯文本轮次完全跳过 Vision；图片轮次才付出视觉模型成本，并把结果
+        # 注入 LLM prompt 和 Live2D 场景提示。
         image_attachment = self._first_image_attachment(event.attachments)
         if image_attachment is None or self.vision_runner is None:
             metadata["vision_graph"] = "skipped"
@@ -184,6 +197,7 @@ class MainRunner:
         event = state["input_event"]# type: ignore
         query = state.get("effective_user_text") or event.text
 
+        # 检索时优先使用视觉增强后的文本；后续写记忆仍保留用户原文和最终回复。
         result = self.memory_runner.retrieve_before_reply(
             user_id=event.user_id,
             user_text=event.text,
@@ -245,6 +259,8 @@ class MainRunner:
         state_result = state["state_result"]# type: ignore
         planner_result = state["planner_result"]# type: ignore
 
+        # Planner 决定是否值得注入 RAG；即使跳过，LLM 仍然拥有 persona、
+        # 短期历史和长期记忆上下文。
         rag_result = self.rag_runner.run(
             user_text=effective_text,
             state_intent=getattr(state_result, "intent", ""),
@@ -332,6 +348,8 @@ class MainRunner:
         motion = llm_result.target_motion or "idle"
         expression = llm_result.target_expression or "neutral"
 
+        # 先构建一份各端通用的 Live2D payload，再合并 Vision 给出的背景、
+        # 表情等建议。
         live2d = self._build_live2d_payload(
             emotion=emotion,
             motion=motion,

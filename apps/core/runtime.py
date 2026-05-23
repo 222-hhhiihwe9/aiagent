@@ -1,4 +1,8 @@
-"""Runtime lifecycle management for the core application."""
+"""核心应用的 runtime 生命周期管理。
+
+CoreRuntime 是 API 路由和本地工具共用的门面。它把 HTTP 友好的方法调用
+转换成 InputEvent，再交给 dispatcher 和图流程执行推理。
+"""
 
 from aiagent.brain.agent_core import AgentCore
 from aiagent.brain.dialogue_manager import DialogueManager
@@ -23,6 +27,8 @@ from aiagent.state.stream_state import StreamingState
 
 
 class CoreRuntime:
+    """API 路由共享的长生命周期 runtime 容器。"""
+
     def __init__(
         self,
         dispatcher: EventDispatcher,
@@ -62,6 +68,7 @@ class CoreRuntime:
         self.vision_runner = vision_runner
 
     def handle_input_event(self, event: InputEvent) -> OutputEvent:
+        """把标准化后的输入事件交给编排器处理。"""
         return self.dispatcher.handle_input(event)
 
     def handle_source_payload(self, source: str, payload: dict) -> OutputEvent:
@@ -131,6 +138,7 @@ class CoreRuntime:
         user_id: str = "guest",
         username: str = "guest",
     ) -> OutputEvent:
+        """保存上传图片、挂载元数据，然后进入主图流程。"""
         attachments: list[InputAttachment] = []
 
         if file_obj is not None and filename:
@@ -313,6 +321,7 @@ class CoreRuntime:
         user_id: str = "guest",
         username: str = "guest",
     ) -> dict:
+        """先执行视觉分析，再把结果转换成聊天输入。"""
         if self.vision_runner is None:
             raise RuntimeError("Vision runner is not configured.")
 

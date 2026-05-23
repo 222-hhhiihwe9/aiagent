@@ -17,6 +17,12 @@ from config.paths import KNOWLEDGE_CACHE_DIR, KNOWLEDGE_PUBLIC_DIR
 
 
 class RAGPipeline:
+    """构建、缓存并查询项目知识索引。
+
+    所有知识文件会合并进同一个逻辑索引。split_docs 缓存和 FAISS 目录让
+    正常启动可以复用上一次构建结果。
+    """
+
     def __init__(
         self,
         loader: DocumentLoader,
@@ -53,6 +59,7 @@ class RAGPipeline:
         }
 
     def build_index(self, force_rebuild: bool = False) -> dict[str, Any]:
+        """同步构建或加载 RAG 索引。"""
         with self._build_lock:
             self._build_status.update(
                 {
@@ -90,6 +97,7 @@ class RAGPipeline:
         return stats
 
     def rebuild_async(self,force_rebuild:bool = True) -> dict[str,Any]:
+        """启动后台重建任务，供 /knowledge/rebuild 接口使用。"""
         with self._build_lock:
             if self._build_status.get("running"):
                 return self.build_status()
@@ -125,6 +133,8 @@ class RAGPipeline:
             pass
     
     def _build_index_inner(self,force_rebuild:bool = False) ->dict[str,Any]:
+        # 快速路径：直接加载已缓存的 split docs 和 FAISS 向量，
+        # 避免每次启动都重新 embedding 全部知识文件。
         if not force_rebuild and self.docs_index_path.exists() and self.faiss_dir.exists():
             self._load_documents()
             self.vector_store.load(self.faiss_dir)
@@ -167,6 +177,8 @@ class RAGPipeline:
 
         final_top_k = top_k or self.final_top_k
 
+        # 先召回更宽的候选集合，再重排到最终 prompt 预算内；
+        # 这样能兼顾 BM25 精确匹配和向量召回。
         coarse = self.retriever.retrieve(
             query=query,
             vector_store=self.vector_store,

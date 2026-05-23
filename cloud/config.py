@@ -1,0 +1,65 @@
+from __future__ import annotations
+
+from pydantic import Field, field_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class CloudSettings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
+
+    cloud_mode: bool = Field(default=False, alias="CLOUD_MODE")
+    cloud_deploy_region: str = Field(default="tencent-cn", alias="CLOUD_DEPLOY_REGION")
+    api_public_base_url: str = Field(default="", alias="API_PUBLIC_BASE_URL")
+
+    redis_url: str = Field(default="", alias="REDIS_URL")
+    redis_prefix: str = Field(default="aiagent:v1", alias="REDIS_PREFIX")
+
+    rate_limit_enabled: bool = Field(default=False, alias="RATE_LIMIT_ENABLED")
+    inflight_limit_enabled: bool = Field(default=False, alias="INFLIGHT_LIMIT_ENABLED")
+    limiter_fail_open: bool = Field(default=True, alias="LIMITER_FAIL_OPEN")
+
+    rate_limit_default_per_minute: int = Field(default=60, alias="RATE_LIMIT_DEFAULT_PER_MINUTE")
+    rate_limit_chat_per_minute: int = Field(default=20, alias="RATE_LIMIT_CHAT_PER_MINUTE")
+    rate_limit_multimodal_per_minute: int = Field(default=5, alias="RATE_LIMIT_MULTIMODAL_PER_MINUTE")
+    rate_limit_voice_per_minute: int = Field(default=5, alias="RATE_LIMIT_VOICE_PER_MINUTE")
+    rate_limit_rebuild_per_minute: int = Field(default=1, alias="RATE_LIMIT_REBUILD_PER_MINUTE")
+
+    global_inflight_limit: int = Field(default=100, alias="GLOBAL_INFLIGHT_LIMIT")
+    chat_inflight_limit: int = Field(default=40, alias="CHAT_INFLIGHT_LIMIT")
+    multimodal_inflight_limit: int = Field(default=10, alias="MULTIMODAL_INFLIGHT_LIMIT")
+    voice_inflight_limit: int = Field(default=8, alias="VOICE_INFLIGHT_LIMIT")
+    rebuild_inflight_limit: int = Field(default=1, alias="REBUILD_INFLIGHT_LIMIT")
+    inflight_lease_seconds: int = Field(default=120, alias="INFLIGHT_LEASE_SECONDS")
+
+    storage_provider: str = Field(default="local", alias="STORAGE_PROVIDER")
+    local_storage_root: str = Field(default="data/cloud_storage", alias="LOCAL_STORAGE_ROOT")
+    upload_max_bytes: int = Field(default=26214400, alias="UPLOAD_MAX_BYTES")
+
+    s3_endpoint_url: str = Field(default="", alias="S3_ENDPOINT_URL")
+    s3_region: str = Field(default="ap-guangzhou", alias="S3_REGION")
+    s3_bucket: str = Field(default="", alias="S3_BUCKET")
+    s3_access_key_id: str | None = Field(default=None, alias="S3_ACCESS_KEY_ID")
+    s3_secret_access_key: str | None = Field(default=None, alias="S3_SECRET_ACCESS_KEY")
+    s3_public_base_url: str = Field(default="", alias="S3_PUBLIC_BASE_URL")
+
+    gpu_llm_base_url: str = Field(default="", alias="GPU_LLM_BASE_URL")
+    gpu_tts_base_url: str = Field(default="", alias="GPU_TTS_BASE_URL")
+    gpu_asr_base_url: str = Field(default="", alias="GPU_ASR_BASE_URL")
+
+    @field_validator(
+        "s3_access_key_id",
+        "s3_secret_access_key",
+        mode="before",
+    )
+    @classmethod
+    def _empty_secret_to_none(cls, value: object) -> object:
+        if value == "":
+            return None
+        return value
+
+
+cloud_settings = CloudSettings()

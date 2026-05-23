@@ -3,20 +3,28 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 import faiss
 import numpy as np
 from PIL import Image
-from sentence_transformers import SentenceTransformer
 
 from aiagent.vision.character_registry import CharacterRegistry
 from aiagent.graphs.graph_model import CharacterCandidate
+
+if TYPE_CHECKING:
+    from sentence_transformers import SentenceTransformer
 
 logger = logging.getLogger(__name__)
 
 
 class CharacterRetriever:
+    """基于 FAISS 的角色图片检索器。
+
+    embedding 模型按需加载，避免 health/chat/RAG 等后端路由在启动时就导入
+    torch、sklearn、scipy 等重依赖。
+    """
+
     def __init__(
         self,
         registry: CharacterRegistry,
@@ -44,6 +52,7 @@ class CharacterRetriever:
         self._records: list[dict[str, Any]] = []
 
     def build_index(self, force_rebuild: bool = False) -> dict[str, Any]:
+        """根据角色 profile 和图片目录构建参考图索引。"""
         if not force_rebuild and self.index_path.exists() and self.records_path.exists():
             self._load_index()
             return self.stats()
@@ -94,6 +103,7 @@ class CharacterRetriever:
         return self.stats()
 
     def retrieve(self, image_path: str | Path, top_k: int = 5) -> list[CharacterCandidate]:
+        """为上传图片返回最匹配的角色候选。"""
         self._ensure_loaded()
 
         if self._index is None or not self._records or self._index.ntotal == 0:
@@ -203,6 +213,10 @@ class CharacterRetriever:
     def _get_model(self) -> SentenceTransformer:
         if self._model is not None:
             return self._model
+
+        # 本地导入可以让 API 启动更轻。即使加载失败，也只影响视觉角色检索，
+        # 文本聊天和 RAG 仍可启动。
+        from sentence_transformers import SentenceTransformer
 
         model_name = self.embedding_model_path.strip() or self.embedding_model_name.strip()
         if not model_name:

@@ -1,0 +1,16 @@
+.git
+.venv
+.pytest_cache
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.env
+.env.*
+!.env.example
+data/cache
+data/uploads
+data/cloud_storage
+apps/flutter_client/build
+apps/flutter_client/.dart_tool
+apps/flutter_client/android/.gradle

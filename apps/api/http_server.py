@@ -1,13 +1,21 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.staticfiles import StaticFiles
 
+from cloud.config import cloud_settings
+from cloud.middleware import cloud_guard_middleware
 from apps.api.middleware import request_logging_middleware
 from apps.api.routes.audio import router as audio_router
 from apps.api.routes.chat import router as chat_router
+from apps.api.routes.cloud import router as cloud_router
+from apps.api.routes.cloud_gpu import router as cloud_gpu_router
+from apps.api.routes.cloud_ops import router as cloud_ops_router
+from apps.api.routes.cloud_tasks import router as cloud_tasks_router
 from apps.api.routes.control import router as control_router
 from apps.api.routes.diagnostics import router as diagnostics_router
 from apps.api.routes.health import router as health_router
@@ -23,6 +31,7 @@ logger = logging.getLogger("aiagent.api")
 
 app = FastAPI(title="aiagent api", version="1.0.0")
 
+app.middleware("http")(cloud_guard_middleware)
 app.middleware("http")(request_logging_middleware)
 
 cors_origins = [
@@ -39,7 +48,20 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+if cloud_settings.storage_provider.lower() == "local":
+    storage_root = Path(cloud_settings.local_storage_root)
+    storage_root.mkdir(parents=True, exist_ok=True)
+    app.mount(
+        "/cloud-files",
+        StaticFiles(directory=str(storage_root)),
+        name="cloud-files",
+    )
+
 app.include_router(health_router)
+app.include_router(cloud_router)
+app.include_router(cloud_tasks_router)
+app.include_router(cloud_gpu_router)
+app.include_router(cloud_ops_router)
 app.include_router(diagnostics_router)
 app.include_router(chat_router)
 app.include_router(multimodal_chat_router)
@@ -54,7 +76,11 @@ app.include_router(live2d_router)
 
 @app.on_event("startup")
 async def on_startup() -> None:
-    logger.info("API server started.")
+    logger.info(
+        "API server started cloud_mode=%s storage_provider=%s",
+        cloud_settings.cloud_mode,
+        cloud_settings.storage_provider,
+    )
 
 
 @app.get("/")
@@ -63,4 +89,5 @@ def root():
         "ok": True,
         "service": "aiagent api",
         "version": "1.0.0",
+        "cloud_mode": cloud_settings.cloud_mode,
     }

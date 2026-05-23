@@ -69,6 +69,7 @@ from integrations.tts.voxcpm_client import VoxCPMClient
 
 
 def _resolve_env_secret(value: str | None) -> str | None:
+    """解析环境变量名，或兼容少量直接传入的密钥值。"""
     if value is None:
         return None
 
@@ -89,8 +90,11 @@ def _resolve_env_secret(value: str | None) -> str | None:
 
 
 def build_runtime() -> CoreRuntime:
+    """根据配置组装后端长生命周期 runtime。"""
     setup_logger(settings.log_level)
 
+    # 这些状态对象只创建一次，让图节点、API 路由、音频播放和控制动作
+    # 看到同一个运行时会话。
     agent_state = AgentRuntimeState()
     conversation_state = ConversationState()
     emotion_state = EmotionState()
@@ -100,6 +104,7 @@ def build_runtime() -> CoreRuntime:
     dialogue_manager = DialogueManager()
     interrupt_manager = InterruptManager()
 
+    # RAG 正常启动时优先加载缓存索引；需要强制重建时走 /knowledge/rebuild。
     rag_pipeline = RAGPipeline(
         loader=DocumentLoader(),
         retriever=HybridRetriever(
@@ -137,6 +142,8 @@ def build_runtime() -> CoreRuntime:
         min_cosine_score=0.42,
         require_relevance=True,
     )
+    # Vision 分成通用图片理解和本地角色检索两部分。CharacterRetriever 会
+    # 延迟加载 CLIP 模型，避免文本聊天启动时提前导入重型 ML 依赖。
     if settings.vision_provider.strip().lower() == "lmstudio":
         vision_api_key = settings.lmstudio_api_key or "lm-studio"
     else:
@@ -194,6 +201,7 @@ def build_runtime() -> CoreRuntime:
     llm_service = LLMService(settings=settings)
     llm_runner = LLMRunner(llm_service=llm_service, short_term_turn_window=6)
 
+    # MemoryRunner 每轮会使用两次：回复前检索长期记忆，回复后按策略写入。
     long_term_memory = Mem0LongTermMemory(
         llm_provider=settings.memory_llm_provider,
         llm_model=settings.memory_llm_model,
@@ -277,6 +285,8 @@ def build_runtime() -> CoreRuntime:
     )
     live2d_dispatcher = None
 
+    # 后端 Live2D 可以先 mock；手机端有内置过渡模型。provider 非 mock/noop
+    # 时才启用真实文件 payload。
     if settings.live2d_provider.strip().lower() in {"mock", "noop", "disabled"}:
         live2d_dispatcher = NoopLive2DDispatcher()
     else:

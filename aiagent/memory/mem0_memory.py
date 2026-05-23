@@ -15,6 +15,8 @@ NO_LONG_TERM_MEMORY_TEXT = "无长期记忆。"
 
 @dataclass(frozen=True)
 class MemoryHit:
+    """返回给图节点和 API 路由的标准化记忆命中。"""
+
     id: str
     memory: str
     score: float | None = None
@@ -25,6 +27,12 @@ class MemoryHit:
 
 
 class Mem0LongTermMemory:
+    """Mem0 长期记忆的安全封装层。
+
+    集中处理 provider 配置、中文记忆抽取 prompt、结果标准化，以及 API
+    并发读写时需要的锁。
+    """
+
     def __init__(
         self,
         llm_provider: str,
@@ -143,6 +151,7 @@ class Mem0LongTermMemory:
         limit: int = 6,
         agent_id: str = "yzl",
     ) -> list[MemoryHit]:
+        """按用户范围检索长期记忆，供 prompt 注入使用。"""
         query = query.strip()
         if not query:
             return []
@@ -176,6 +185,7 @@ class Mem0LongTermMemory:
         agent_id: str = "yzl",
         metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        """在策略允许时写入一轮完整的用户/助手对话。"""
         if not user_text.strip() or not assistant_text.strip():
             return {"status": "skipped", "reason": "empty_turn"}
 
@@ -207,6 +217,7 @@ class Mem0LongTermMemory:
         return result if isinstance(result, dict) else {"status": "ok", "result": result}
 
     def _build_chinese_memory_prompt(self, metadata: dict[str, Any]) -> str:
+        """引导 Mem0 保留稳定中文事实，而不是临时闲聊。"""
         memory_hint = str(metadata.get("memory_hint", "")).strip()
         hint_text = f"\n优先参考这条已审核的记忆提示：{memory_hint}\n" if memory_hint else ""
 

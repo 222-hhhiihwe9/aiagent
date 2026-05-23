@@ -7,10 +7,15 @@ from pathlib import Path
 from typing import Any
 
 from langchain_core.documents import Document
-from langchain_text_splitters import MarkdownHeaderTextSplitter, RecursiveCharacterTextSplitter
+# 直接导入具体 splitter 模块，避免包根导入可选的 sentence-transformer
+# splitter；后者会在 API 启动时拉起较重的 ML 依赖。
+from langchain_text_splitters.character import RecursiveCharacterTextSplitter
+from langchain_text_splitters.markdown import MarkdownHeaderTextSplitter
 
 
 class DocumentLoader:
+    """加载支持的知识文件，并统一转成 Document。"""
+
     SUPPORTED_SUFFIXES = {".txt", ".md", ".markdown", ".json", ".jsonl", ".pdf"}
 
     MARKDOWN_HEADERS = [
@@ -24,6 +29,7 @@ class DocumentLoader:
         self.logger = logging.getLogger(self.__class__.__name__)
 
     def load_directory(self, directory: str | Path) -> list[Document]:
+        """递归加载知识目录下所有支持的文件。"""
         root = Path(directory)
         if not root.exists():
             raise FileNotFoundError(f"Knowledge directory not found: {root}")
@@ -71,6 +77,7 @@ class DocumentLoader:
         chunk_size: int = 520,
         chunk_overlap: int = 80,
     ) -> list[Document]:
+        """把加载后的文档切成适合检索的 chunk。"""
         if not documents:
             return []
 
@@ -112,6 +119,8 @@ class DocumentLoader:
         chunk_size: int,
         chunk_overlap: int,
     ) -> list[Document]:
+        # 尽量保留 Markdown 标题层级，让召回片段带有可读标题；
+        # 解析失败时降级到普通切分，保证索引流程不中断。
         markdown_splitter = MarkdownHeaderTextSplitter(
             headers_to_split_on=self.MARKDOWN_HEADERS,
             strip_headers=False,
